@@ -1,0 +1,2472 @@
+---
+title: "Results_prediction_V3"
+author: "Anaïs Marquisseau"
+date: "15/06/2022"
+output: 
+  html_document :
+    toc: true
+    toc_depth: 4
+    df_print: paged
+    code_folding: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+## Libraries
+
+```{r libraries, message=FALSE, warning=FALSE}
+rm(list = ls(all.names = TRUE))
+gc()
+
+library(tidyverse)
+library(knitr)
+library(rsample)
+library(plotly)
+library(ggpubr)
+library(multcompView)
+
+theme_set(theme_minimal())
+
+source("t_tests.R")
+```
+
+```{r data, message=FALSE, warning=FALSE}
+df_SC_V3 = read_tsv("for_cluster/V3/df_SC_V3")
+
+set.seed(53)
+cv = rsample::vfold_cv(df_SC_V3, repeats = 50, v = 5, strata = annee_lignee)
+
+nech = function(object) {
+  test = nrow(rsample::testing(object))
+  train = nrow(rsample::training(object))
+  
+  df = data.frame("train" = train, "test" = test)
+  
+  return(df)
+}
+
+nech_sum = purrr::map_dfr(cv$splits, nech) %>%
+  summarise_all(sum)
+
+```
+
+Pics Florian
+```{r pics metabolites, message=FALSE, warning=FALSE}
+metabolites = read_tsv("Data/Metabolites_pics_florian.tsv")
+
+metabolites %>%
+  filter(metabolite %in% c("Citrate", "L-Threonine", "B-HydroxyisovalericAcid", "MalicAcid","L-Leucine", "L-Serine")) %>%
+  select(ppm)%>%
+  as_vector()
+
+best_flo_names = c("L-Leu","L-Leu","L-Leu", 
+                   "L-Thr","L-Thr","L-Thr",
+                   "L-Ser","L-Ser",
+                   "Mal", "Mal","Mal",
+                   "B-Hyd","B-Hyd",
+                   "Cit")
+
+best_flo_pics = c(0.9660, 1.7200, 3.7400,
+                  1.3375, 3.6000, 4.2600,
+                  3.8540, 3.9800,
+                  2.3760, 2.6750, 4.3000, 
+                  1.2720, 2.3680, 
+                  2.6000)
+```
+***
+
+## Predictions {.tabset}
+
+
+### I. Prediction de l'ingestion {.tabset}
+
+```{r data ingestion, message=FALSE, warning=FALSE}
+#Zootechnie
+loadings_ingestion_zootech = read_tsv("for_cluster/output_V3/model250/ingestion/loadings_ingestion_zootech_SC_V3.tsv")
+metrics_ingestion_zootech =read_tsv("for_cluster/output_V3/model250/ingestion/metrics_ingestion_zootech_SC_V3.tsv")
+  
+#Buckets
+loadings_ingestion_buckets = read_tsv("for_cluster/output_V3/model250/ingestion/loadings_ingestion_buckets_SC_V3.tsv")
+metrics_ingestion_buckets = read_tsv("for_cluster/output_V3/model250/ingestion/metrics_ingestion_buckets_SC_V3.tsv")
+
+#All
+loadings_ingestion_all = read_tsv("for_cluster/output_V3/model250/ingestion/loadings_ingestion_all_SC_V3.tsv")
+metrics_ingestion_all = read_tsv("for_cluster/output_V3/model250/ingestion/metrics_ingestion_all_SC_V3.tsv")
+```
+***
+
+#### 1. Zootechnie + Fixes
+
+##### a) metrics
+```{r metriques ZI, message=FALSE, warning=FALSE}
+metrics_ingestion_zootech %>%
+  ggplot(aes(variable, value)) +
+  geom_jitter(color = "light grey", size=1.5, alpha=0.30) +
+  geom_boxplot(aes(color=variable))+
+  stat_summary(fun = mean, geom="point", shape=20, size=3, color="black", fill="black") +
+  labs(y= "Metriques", color = "Mesures" )+
+  ggtitle("Mesures pour spls ingestion")+
+  facet_wrap(~variable, scale="free")
+
+metrics_ingestion_zootech %>%
+  group_by(variable) %>%
+  summarise(min = min(value), mean = mean(value), max = max(value))
+
+metrics_ingestion_zootech %>%
+  filter(variable== "MAE") %>%
+  summarise(pourc_range = (mean(value)*100)/(max(df_SC_V3$CONMOY)-min(df_SC_V3$CONMOY)), 
+            pourc_mean = (mean(value)*100)/mean(df_SC_V3$CONMOY))
+```
+
+##### b) loadings
+
+```{r loadings ZI, message=FALSE, warning=FALSE}
+long_loadings = reshape2::melt(loadings_ingestion_zootech,id.vars=c("rep", "comp"))
+
+long_loadings %>%
+  filter(comp == "comp1")%>%
+  ggplot(aes(variable, value)) +
+  geom_jitter(color = "light grey", size=1.5, alpha=0.30) +
+  geom_boxplot(aes(color=variable))+
+  labs(y= "Loadings", color = "Variables" )+
+  ggtitle("Loadings pour composante 1")
+
+long_loadings %>%
+  filter(comp == "comp2")%>%
+  ggplot(aes(variable, value)) +
+  geom_jitter(color = "light grey", size=1.5, alpha=0.30) +
+  geom_boxplot(aes(color=variable))+
+  labs(y= "Loadings", color = "Variables" )+
+  ggtitle("Loadings pour composante 2")
+
+long_loadings %>%
+  filter (comp == "comp1") %>%
+  group_by(comp, variable) %>%
+  summarise(mean = mean(value))%>%
+  filter(mean != 0) %>%
+  arrange(desc(mean))
+
+#mean loadings
+long_loadings %>%
+  filter (comp == "comp1") %>%
+  group_by(comp, variable) %>%
+  summarise(min= min(value), mean = mean(value), max = max(value), mean_abs = mean(abs(value)))%>%
+  filter(mean != 0) %>%
+  arrange(desc(mean_abs))
+
+#count loadings
+long_loadings %>%
+  filter (comp == "comp1" & value != 0) %>%
+  group_by(comp, variable) %>%
+  count() %>%
+  arrange(desc(n))
+```
+
+#### 2. Buckets
+
+
+##### a) metrics
+```{r metriques BI, message=FALSE, warning=FALSE}
+metrics_ingestion_buckets %>%
+  ggplot(aes(variable, value)) +
+  geom_jitter(color = "light grey", size=1.5, alpha=0.30) +
+  geom_boxplot(aes(color=variable))+
+  stat_summary(fun = mean, geom="point", shape=20, size=3, color="black", fill="black") +
+  labs(y= "Metriques", color = "Mesures" )+
+  ggtitle("Mesures pour spls ingestion")+
+  facet_wrap(~variable, scale="free")
+
+metrics_ingestion_buckets %>%
+  group_by(variable) %>%
+  summarise(min = min(value), mean = mean(value), max = max(value))
+
+metrics_ingestion_buckets %>%
+  filter(variable== "MAE") %>%
+  summarise(pourc_range = (mean(value)*100)/(max(df_SC_V3$CONMOY)-min(df_SC_V3$CONMOY)), 
+            pourc_mean = (mean(value)*100)/mean(df_SC_V3$CONMOY))
+```
+
+##### b) loadings
+
+```{r loadings BI, message=FALSE, warning=FALSE}
+long_loadings = reshape2::melt(loadings_ingestion_buckets,id.vars=c("rep", "comp"))
+
+#mean loadings
+best_loadings = long_loadings %>%
+  filter (comp == "comp1") %>%
+  group_by(comp, variable) %>%
+  summarise(min= min(value), mean = mean(value), max = max(value), mean_abs = mean(abs(value)))%>%
+  filter(mean != 0) %>%
+  arrange(desc(mean_abs))
+best_loadings
+
+#count loadings
+long_loadings %>%
+  filter (comp == "comp1" & value != 0) %>%
+  group_by(comp, variable) %>%
+  count() %>%
+  arrange(desc(n))
+
+ggplotly(
+  best_loadings %>%
+  ggplot(aes(x=as.numeric(as.character(best_loadings$variable)), y=mean_abs))+
+  geom_col()+
+  annotate(geom = "point", x=metabolites$ppm, y=0, color = "blue", size = 0.5)+
+  annotate(geom="text", x=best_flo_pics, y=-0.005, color = "red", label=best_flo_names, size=2)+
+  annotate(geom = "point", x=best_flo_pics, y=0, color = "red", size = 0.6))
+```
+
+##### c) Corresponding pics  [ERRORS]
+
+```{r add_buckets2metabo, message=FALSE, warning=FALSE}
+metabolites = metabolites %>%
+  add_column(variable = rep(NA,nrow(metabolites)))
+
+b = as.numeric(names(df_SC_V3[37:length(df_SC_V3)]))
+b = as.data.frame(b)
+
+for (x in 1:nrow(metabolites)) {
+
+  bucket = b %>%
+    filter(b <= metabolites$ppm[x] & (b > (metabolites$ppm[x]-0.01)))
+  metabolites$variable[x] = bucket
+}
+```
+
+```{r eval=FALSE, include=FALSE}
+ggplotly(
+  best_loadings %>%
+  ggplot(aes(x=as.numeric(as.character(best_loadings$variable)), y=mean_abs))+
+  geom_col()+
+  annotate(geom = "point", x=metabolites$ppm, y=0, color = "red", size = 0.5, name =metabolites$metabolite))#+
+  #annotate("text", x = metabolites$ppm, y = -0.005, label = metabolites$metabolite, color = "red", size = 2)
+
+
+#bhydroxy
+  geom_vline(xintercept = 1.27, color="red", linetype="dashed")+
+  geom_vline(xintercept = 2.37, color="red", linetype="dashed")+
+  #acetic acid
+  geom_vline(xintercept = 2.37, color="red", linetype="dashed")+
+
+metabolites %>%
+  filter(ppm >= 1.895 & ppm < 1.975)
+
+metabolites %>%
+  filter(metabolite == "B-HydroxyisovalericAcid")
+
+
+as.numeric(as.character(best_loadings$variable))
+```
+
+##### d) ncomp, nvar
+
+nombre composantes
+```{r}
+loadings_ingestion_buckets %>%
+  group_by(rep) %>%
+  count()%>%
+  ungroup()%>%
+  summarise(mean = mean(n))
+
+loadings_ingestion_buckets %>%
+  group_by(rep) %>%
+  count()%>%
+  ggplot(aes(x=as_factor(n)))+
+  geom_bar()
+```
+
+nombre variables selectionnees : la grille ne fonctionne que pour la composante 1 !
+```{r}
+long_loadings %>%
+  filter(value != 0 & comp == "comp1") %>%
+  group_by(rep, comp) %>%
+  count()%>%
+  ggplot(aes(as_factor(n)))+
+  geom_bar()
+
+long_loadings %>%
+  filter(value != 0 & comp == "comp2") %>%
+  group_by(rep, comp) %>%
+  count()%>%
+  ggplot(aes(as_factor(n)))+
+  geom_bar()
+```
+
+#### 3. M+Z+F
+
+##### a) metrics
+```{r metriques AI, message=FALSE, warning=FALSE}
+metrics_ingestion_all %>%
+  ggplot(aes(variable, value)) +
+  geom_jitter(color = "light grey", size=1.5, alpha=0.30) +
+  geom_boxplot(aes(color=variable))+
+  stat_summary(fun = mean, geom="point", shape=20, size=3, color="black", fill="black") +
+  labs(y= "Metriques", color = "Mesures" )+
+  ggtitle("Mesures pour spls ingestion")+
+  facet_wrap(~variable, scale="free")
+
+metrics_ingestion_all %>%
+  group_by(variable) %>%
+  summarise(min = min(value), mean = mean(value), max = max(value))
+
+metrics_ingestion_all %>%
+  filter(variable== "MAE") %>%
+  summarise(pourc_range = (mean(value)*100)/(max(df_SC_V3$CONMOY)-min(df_SC_V3$CONMOY)), 
+            pourc_mean = (mean(value)*100)/mean(df_SC_V3$CONMOY))
+```
+
+##### b) loadings
+
+```{r loadings AI, message=FALSE, warning=FALSE}
+long_loadings = reshape2::melt(loadings_ingestion_all,id.vars=c("rep", "comp"))
+
+#mean loadings
+best_loadings = long_loadings %>%
+  filter (comp == "comp1") %>%
+  group_by(comp, variable) %>%
+  summarise(min= min(value), mean = mean(value), max = max(value), mean_abs = mean(abs(value)))%>%
+  filter(mean != 0) %>%
+  arrange(desc(mean_abs))
+best_loadings
+
+#count loadings
+long_loadings %>%
+  filter (comp == "comp1" & value != 0) %>%
+  group_by(comp, variable) %>%
+  count() %>%
+  arrange(desc(n))
+
+ggplotly(
+  best_loadings %>%
+  ggplot(aes(x=as.numeric(as.character(best_loadings$variable)), y=mean_abs))+
+  geom_col()+
+  annotate(geom = "point", x=metabolites$ppm, y=0, color = "red", size = 0.5, name =metabolites$metabolite))
+```
+##### c) ncomp, nvar
+
+nombre composantes
+```{r}
+loadings_ingestion_all %>%
+  group_by(rep) %>%
+  count()%>%
+  ungroup()%>%
+  summarise(mean = mean(n))
+
+loadings_ingestion_all %>%
+  group_by(rep) %>%
+  count()%>%
+  ggplot(aes(x=as_factor(n)))+
+  geom_bar()
+```
+
+nombre variables selectionnees : la grille ne fonctionne que pour la composante 1 !
+```{r}
+long_loadings %>%
+  filter(value != 0 & comp == "comp1") %>%
+  group_by(rep, comp) %>%
+  count()%>%
+  ggplot(aes(as_factor(n)))+
+  geom_bar()
+
+long_loadings %>%
+  filter(value != 0 & comp == "comp2") %>%
+  group_by(rep, comp) %>%
+  count()%>%
+  ggplot(aes(as_factor(n)))+
+  geom_bar()
+```
+
+#### 4. Comparaison {.tabset}
+
+```{r}
+cross.val.results = list(
+  accuracy = list(
+    Z = list(
+      corr_spearman = metrics_ingestion_zootech %>%
+        filter(variable == "corr_spearman")%>%
+        select(value)%>%
+        as_vector(),
+      R2 =metrics_ingestion_zootech %>%
+        filter(variable == "R2")%>%
+        select(value)%>%
+        as_vector(),
+      MSE =metrics_ingestion_zootech %>%
+        filter(variable == "MSE")%>%
+        select(value)%>%
+        as_vector(),
+      RMSE =metrics_ingestion_zootech %>%
+        filter(variable == "RMSE")%>%
+        select(value)%>%
+        as_vector(),
+      bias =metrics_ingestion_zootech %>%
+        filter(variable == "bias")%>%
+        select(value)%>%
+        as_vector(),
+      MAE =metrics_ingestion_zootech %>%
+        filter(variable == "MAE")%>%
+        select(value)%>%
+        as_vector()
+    ),
+    M =list(
+      corr_spearman = metrics_ingestion_buckets %>%
+        filter(variable == "corr_spearman")%>%
+        select(value)%>%
+        as_vector(),
+      R2 =metrics_ingestion_buckets %>%
+        filter(variable == "R2")%>%
+        select(value)%>%
+        as_vector(),
+      MSE =metrics_ingestion_buckets %>%
+        filter(variable == "MSE")%>%
+        select(value)%>%
+        as_vector(),
+      RMSE =metrics_ingestion_buckets %>%
+        filter(variable == "RMSE")%>%
+        select(value)%>%
+        as_vector(),
+      bias =metrics_ingestion_buckets %>%
+        filter(variable == "bias")%>%
+        select(value)%>%
+        as_vector(),
+      MAE =metrics_ingestion_buckets %>%
+        filter(variable == "MAE")%>%
+        select(value)%>%
+        as_vector()
+    ),
+    All =list(
+      corr_spearman = metrics_ingestion_all %>%
+        filter(variable == "corr_spearman")%>%
+        select(value)%>%
+        as_vector(),
+      R2 =metrics_ingestion_all %>%
+        filter(variable == "R2")%>%
+        select(value)%>%
+        as_vector(),
+      MSE =metrics_ingestion_all %>%
+        filter(variable == "MSE")%>%
+        select(value)%>%
+        as_vector(),
+      RMSE =metrics_ingestion_all %>%
+        filter(variable == "RMSE")%>%
+        select(value)%>%
+        as_vector(),
+      bias =metrics_ingestion_all %>%
+        filter(variable == "bias")%>%
+        select(value)%>%
+        as_vector(),
+      MAE =metrics_ingestion_all %>%
+        filter(variable == "MAE")%>%
+        select(value)%>%
+        as_vector()
+    )
+    
+  ),
+  n_training_instances = nech_sum[[1]],
+  n_testing_instances = nech_sum[[2]],
+  number.of.rep = 50,
+  number.of.folds = 5
+)
+```
+
+```{r}
+comp = algo.test(cross.val.results)
+```
+
+##### a) R2
+```{r}
+table = data.frame(diet_seq = rep("DAC",3),
+           outcome = rep("ingestion",3), 
+           Predictors = comp$summary$algo[13:15],
+           R2 = data.frame(R2 = c(mean(cross.val.results$accuracy$Z$R2),mean(cross.val.results$accuracy$M$R2),mean(cross.val.results$accuracy$All$R2))),
+           sd = gsub('[()]', '',comp$summary$`(sd)`)[13:15],
+           letter = comp$summary$letter[13:15])
+
+table$letter = as_factor(table$letter)
+table$sd = as.numeric(table$sd)
+```
+
+```{r Plot comp ingestion, message=FALSE, warning=FALSE}
+p_ingestion <-ggplot(table, aes(x=outcome, y=R2, fill=Predictors)) +
+  #barplot
+  geom_col(width = 0.5,#bar width
+           position = position_dodge(0.6),#space between bars on the same x
+           colour="black", size=0.2)+#colour and size of bar lines
+  scale_fill_manual(values=c("#9dc544", "#00a3a6","#423089"),#colors of bars
+                    name="Predictor set:")+#name for the legend
+  #error bars
+  geom_errorbar(aes(ymin=R2, ymax=R2+sign(R2)*sd),#length of error bars
+                 width=0.2,#width of error bars
+                 position=position_dodge(0.6),#space between bars on the same x
+                stat="identity")+
+  #letters to indicate significant differences or non significant
+  geom_text(aes(label = letter,#name of the variable used for labelling
+                y = R2 + sign(R2)*sd +sign(R2)*0.05),#vertical position of the letter
+            position = position_dodge(0.6),#space between bars on the same x
+            family="Raleway", size=4.5)+#letter label style
+  #theme
+  theme_classic()+
+  #legend
+  theme(legend.position="top")+#legend position
+  theme(legend.title = element_text(colour="black", size=11, family="Raleway"))+#legend title style
+  theme(legend.text = element_text(colour="black", size=10, family="sans"))+#legend text style
+  #grid style
+  theme(panel.grid.major.y = element_line(color = "grey80", size = 0.5, linetype = 1))+#horizontal grid style
+  #x axis
+  xlab("Predicted outcome")+#x axis title
+  theme(axis.title.x = element_text(colour="black", size=10, family="Raleway SemiBold", vjust=-0.8))+# x axis title style
+  theme(axis.text.x = element_text(colour="grey30", size=10, family="sans"))+# x axis text style
+  #y axis
+  ylab("R2")+#y axis title
+  theme(axis.title.y = element_text(colour="black", size=10, family="Raleway SemiBold", vjust=+2))+# y axis title style
+  theme(axis.text.y = element_text(colour="grey30", size=10, family="sans"))
+
+p_ingestion
+```
+
+##### b) MAE
+```{r}
+table = data.frame(diet_seq = rep("DAC",3),
+           outcome = rep("ingestion",3), 
+           Predictors = comp$summary$algo[13:15],
+           MAE = data.frame(MAE = c(mean(cross.val.results$accuracy$Z$MAE),mean(cross.val.results$accuracy$M$MAE),mean(cross.val.results$accuracy$All$MAE))),
+           sd = gsub('[()]', '',comp$summary$`(sd)`)[13:15],
+           letter = comp$summary$letter[13:15])
+
+table$letter = as_factor(table$letter)
+table$sd = as.numeric(table$sd)
+```
+
+```{r}
+p_ingestion_MAE <-ggplot(table, aes(x=outcome, y=MAE, fill=Predictors)) +
+  #barplot
+  geom_col(width = 0.5,#bar width
+           position = position_dodge(0.6),#space between bars on the same x
+           colour="black", size=0.2)+#colour and size of bar lines
+  scale_fill_manual(values=c("#E8A0BF", "#C689C6","#937DC2"),#colors of bars
+                    name="Predictor set:")+#name for the legend
+  #error bars
+  geom_errorbar(aes(ymin=MAE, ymax=MAE+sign(MAE)*sd),#length of error bars
+                 width=0.2,#width of error bars
+                 position=position_dodge(0.6),#space between bars on the same x
+                stat="identity")+
+  #letters to indicate significant differences or non significant
+  geom_text(aes(label = letter,#name of the variable used for labelling
+                y = MAE + sign(MAE)*sd +sign(MAE)*0.05),#vertical position of the letter
+            position = position_dodge(0.6),#space between bars on the same x
+            family="Raleway", size=4.5)+#letter label style
+  #theme
+  theme_classic()+
+  #legend
+  theme(legend.position="top")+#legend position
+  theme(legend.title = element_text(colour="black", size=11, family="Raleway"))+#legend title style
+  theme(legend.text = element_text(colour="black", size=10, family="sans"))+#legend text style
+  #grid style
+  theme(panel.grid.major.y = element_line(color = "grey80", size = 0.5, linetype = 1))+#horizontal grid style
+  #x axis
+  xlab("Predicted outcome")+#x axis title
+  theme(axis.title.x = element_text(colour="black", size=10, family="Raleway SemiBold", vjust=-0.8))+# x axis title style
+  theme(axis.text.x = element_text(colour="grey30", size=10, family="sans"))+# x axis text style
+  #y axis
+  ylab("MAE")+#y axis title
+  theme(axis.title.y = element_text(colour="black", size=10, family="Raleway SemiBold", vjust=+2))+# y axis title style
+  theme(axis.text.y = element_text(colour="grey30", size=10, family="sans"))
+
+p_ingestion_MAE
+```
+
+##### c) corr_spearman
+```{r}
+table = data.frame(diet_seq = rep("DAC",3),
+           outcome = rep("ingestion",3), 
+           Predictors = comp$summary$algo[13:15],
+           corr_spearman = data.frame(corr_spearman = c(mean(cross.val.results$accuracy$Z$corr_spearman),mean(cross.val.results$accuracy$M$corr_spearman),mean(cross.val.results$accuracy$All$corr_spearman))),
+           sd = gsub('[()]', '',comp$summary$`(sd)`)[13:15],
+           letter = comp$summary$letter[13:15])
+
+table$letter = as_factor(table$letter)
+table$sd = as.numeric(table$sd)
+```
+
+```{r}
+p_ingestion_sp <-ggplot(table, aes(x=outcome, y=corr_spearman, fill=Predictors)) +
+  #barplot
+  geom_col(width = 0.5,#bar width
+           position = position_dodge(0.6),#space between bars on the same x
+           colour="black", size=0.2)+#colour and size of bar lines
+  scale_fill_manual(values=c("#F9D5A7", "#FFB085","#FFA400"),#colors of bars
+                    name="Predictor set:")+#name for the legend
+  #error bars
+  geom_errorbar(aes(ymin=corr_spearman, ymax=corr_spearman+sign(corr_spearman)*sd),#length of error bars
+                 width=0.2,#width of error bars
+                 position=position_dodge(0.6),#space between bars on the same x
+                stat="identity")+
+  #letters to indicate significant differences or non significant
+  geom_text(aes(label = letter,#name of the variable used for labelling
+                y = corr_spearman + sign(corr_spearman)*sd +sign(corr_spearman)*0.05),#vertical position of the letter
+            position = position_dodge(0.6),#space between bars on the same x
+            family="Raleway", size=4.5)+#letter label style
+  #theme
+  theme_classic()+
+  #legend
+  theme(legend.position="top")+#legend position
+  theme(legend.title = element_text(colour="black", size=11, family="Raleway"))+#legend title style
+  theme(legend.text = element_text(colour="black", size=10, family="sans"))+#legend text style
+  #grid style
+  theme(panel.grid.major.y = element_line(color = "grey80", size = 0.5, linetype = 1))+#horizontal grid style
+  #x axis
+  xlab("Predicted outcome")+#x axis title
+  theme(axis.title.x = element_text(colour="black", size=10, family="Raleway SemiBold", vjust=-0.8))+# x axis title style
+  theme(axis.text.x = element_text(colour="grey30", size=10, family="sans"))+# x axis text style
+  #y axis
+  ylab("corr_spearman")+#y axis title
+  theme(axis.title.y = element_text(colour="black", size=10, family="Raleway SemiBold", vjust=+2))+# y axis title style
+  theme(axis.text.y = element_text(colour="grey30", size=10, family="sans"))
+
+p_ingestion_sp
+```
+
+##### d) Boxplots R2
+```{r}
+R2_ingestion = metrics_ingestion_zootech %>%
+  filter(variable == "R2") %>%
+  add_column("pred" = rep("zootech", 250)) %>%
+  rbind(
+metrics_ingestion_buckets%>%
+  filter(variable == "R2") %>%
+  add_column("pred" = rep("buckets", 250))
+) %>%
+  rbind(
+metrics_ingestion_all%>%
+  filter(variable == "R2") %>%
+  add_column("pred" = rep("all", 250))
+)
+```
+
+```{r}
+R2_ingestion = R2_ingestion %>%
+    tidyr::spread(pred, value) %>%
+    dplyr::mutate(is_increasing_all = all >= zootech) %>%
+  dplyr::mutate(is_increasing_bucket = buckets >= zootech)%>%
+    tidyr::gather("pred", "value", 3:5)
+
+R2_ingestion %>%
+  filter(pred != "all")%>%
+  ggplot(aes(x= pred, y=value))+
+  geom_boxplot()+
+  geom_point(aes(group=id),color = "black", size=1.5, alpha=0.30)+
+  geom_line(aes(group=id, color = if_else(is_increasing_bucket == F, "light blue", "light red")), show.legend = F)
+
+R2_ingestion %>%
+  filter(pred != "buckets")%>%
+  ggplot(aes(x= pred, y=value))+
+  geom_boxplot()+
+  geom_point(aes(group=id),color = "black", size=1.5, alpha=0.30)+
+  geom_line(aes(group=id, color = if_else(is_increasing_all == F, "light blue", "light red")), show.legend = F)
+
+R2_ingestion %>%
+  filter(pred == "all")%>%
+  group_by(is_increasing_all) %>%
+  count()%>%
+  mutate (pour = (n*100)/250)
+
+R2_ingestion %>%
+  filter(pred == "buckets")%>%
+  group_by(is_increasing_bucket) %>%
+  count() %>%
+  mutate (pour = (n*100)/250)
+
+
+``` 
+
+
+##### e) Boxplots MAE
+
+```{r}
+MAE_ingestion = metrics_ingestion_zootech %>%
+  filter(variable == "MAE") %>%
+  add_column("pred" = rep("zootech", 250)) %>%
+  rbind(
+metrics_ingestion_buckets%>%
+  filter(variable == "MAE") %>%
+  add_column("pred" = rep("buckets", 250))
+) %>%
+  rbind(
+metrics_ingestion_all%>%
+  filter(variable == "MAE") %>%
+  add_column("pred" = rep("all", 250))
+)
+```
+
+```{r}
+MAE_ingestion = MAE_ingestion %>%
+    tidyr::spread(pred, value) %>%
+    dplyr::mutate(is_decreasing_all = all <= zootech) %>%
+  dplyr::mutate(is_decreasing_bucket = buckets <= zootech)%>%
+    tidyr::gather("pred", "value", 3:5)
+
+MAE_ingestion %>%
+  filter(pred != "all")%>%
+  ggplot(aes(x= pred, y=value))+
+  geom_boxplot()+
+  geom_point(aes(group=id),color = "black", size=1.5, alpha=0.30)+
+  geom_line(aes(group=id, color = if_else(is_decreasing_bucket == F, "light blue", "light red")), show.legend = F)
+
+MAE_ingestion %>%
+  filter(pred != "buckets")%>%
+  ggplot(aes(x= pred, y=value))+
+  geom_boxplot()+
+  geom_point(aes(group=id),color = "black", size=1.5, alpha=0.30)+
+  geom_line(aes(group=id, color = if_else(is_decreasing_all == F, "light blue", "light red")), show.legend = F)
+
+MAE_ingestion %>%
+  filter(pred == "all")%>%
+  group_by(is_decreasing_all) %>%
+  count()%>%
+  mutate (pour = (n*100)/250)
+
+MAE_ingestion %>%
+  filter(pred == "buckets")%>%
+  group_by(is_decreasing_bucket) %>%
+  count() %>%
+  mutate (pour = (n*100)/250)
+
+
+```
+
+##### f) Boxplots spearman
+```{r}
+corr_spearman_ingestion = metrics_ingestion_zootech %>%
+  filter(variable == "corr_spearman") %>%
+  add_column("pred" = rep("zootech", 250)) %>%
+  rbind(
+metrics_ingestion_buckets%>%
+  filter(variable == "corr_spearman") %>%
+  add_column("pred" = rep("buckets", 250))
+) %>%
+  rbind(
+metrics_ingestion_all%>%
+  filter(variable == "corr_spearman") %>%
+  add_column("pred" = rep("all", 250))
+)
+```
+
+```{r}
+corr_spearman_ingestion = corr_spearman_ingestion %>%
+    tidyr::spread(pred, value) %>%
+    dplyr::mutate(is_increasing_all = all >= zootech) %>%
+  dplyr::mutate(is_increasing_bucket = buckets >= zootech)%>%
+    tidyr::gather("pred", "value", 3:5)
+
+corr_spearman_ingestion %>%
+  filter(pred != "all")%>%
+  ggplot(aes(x= pred, y=value))+
+  geom_boxplot()+
+  geom_point(aes(group=id),color = "black", size=1.5, alpha=0.30)+
+  geom_line(aes(group=id, color = if_else(is_increasing_bucket == F, "light blue", "light red")), show.legend = F)
+
+corr_spearman_ingestion %>%
+  filter(pred != "buckets")%>%
+  ggplot(aes(x= pred, y=value))+
+  geom_boxplot()+
+  geom_point(aes(group=id),color = "black", size=1.5, alpha=0.30)+
+  geom_line(aes(group=id, color = if_else(is_increasing_all == F, "light blue", "light red")), show.legend = F)
+
+corr_spearman_ingestion %>%
+  filter(pred == "all")%>%
+  group_by(is_increasing_all) %>%
+  count()%>%
+  mutate (pour = (n*100)/250)
+
+corr_spearman_ingestion %>%
+  filter(pred == "buckets")%>%
+  group_by(is_increasing_bucket) %>%
+  count() %>%
+  mutate (pour = (n*100)/250)
+
+
+``` 
+
+***
+
+### II. Prediction du FCR {.tabset}
+
+```{r data FCR, message=FALSE, warning=FALSE}
+#Zootechnie
+loadings_fcr_zootech = read_tsv("for_cluster/output_V3/model250/fcr/loadings_fcr_zootech_SC_V3.tsv")
+metrics_fcr_zootech =read_tsv("for_cluster/output_V3/model250/fcr/metrics_fcr_zootech_SC_V3.tsv")
+  
+#Buckets
+loadings_fcr_buckets = read_tsv("for_cluster/output_V3/model250/fcr/loadings_fcr_buckets_SC_V3.tsv")
+metrics_fcr_buckets = read_tsv("for_cluster/output_V3/model250/fcr/metrics_fcr_buckets_SC_V3.tsv")
+
+#All
+loadings_fcr_all = read_tsv("for_cluster/output_V3/model250/fcr/loadings_fcr_all_SC_V3.tsv")
+metrics_fcr_all = read_tsv("for_cluster/output_V3/model250/fcr/metrics_fcr_all_SC_V3.tsv")
+```
+
+***
+
+#### 1. Zootechnie + Fixes
+
+##### a) metrics
+```{r metriques ZF, message=FALSE, warning=FALSE}
+metrics_fcr_zootech %>%
+  ggplot(aes(variable, value)) +
+  geom_jitter(color = "light grey", size=1.5, alpha=0.30) +
+  geom_boxplot(aes(color=variable))+
+  stat_summary(fun = mean, geom="point", shape=20, size=3, color="black", fill="black") +
+  labs(y= "Metriques", color = "Mesures" )+
+  ggtitle("Mesures pour spls fcr")+
+  facet_wrap(~variable, scale="free")
+
+metrics_fcr_zootech %>%
+  group_by(variable) %>%
+  summarise(min = min(value), mean = mean(value), max = max(value))
+
+metrics_fcr_zootech %>%
+  filter(variable== "MAE") %>%
+  summarise(pourc_range = (mean(value)*100)/(max(df_SC_V3$FCR)-min(df_SC_V3$FCR)), 
+            pourc_mean = (mean(value)*100)/mean(df_SC_V3$FCR))
+```
+
+##### b) loadings
+
+```{r loadings ZF, message=FALSE, warning=FALSE}
+long_loadings = reshape2::melt(loadings_fcr_zootech,id.vars=c("rep", "comp"))
+
+long_loadings %>%
+  filter(comp == "comp1")%>%
+  ggplot(aes(variable, value)) +
+  geom_jitter(color = "light grey", size=1.5, alpha=0.30) +
+  geom_boxplot(aes(color=variable))+
+  labs(y= "Loadings", color = "Variables" )+
+  ggtitle("Loadings pour composante 1")
+
+long_loadings %>%
+  filter(comp == "comp2")%>%
+  ggplot(aes(variable, value)) +
+  geom_jitter(color = "light grey", size=1.5, alpha=0.30) +
+  geom_boxplot(aes(color=variable))+
+  labs(y= "Loadings", color = "Variables" )+
+  ggtitle("Loadings pour composante 2")
+
+long_loadings %>%
+  filter (comp == "comp1") %>%
+  group_by(comp, variable) %>%
+  summarise(mean = mean(value))%>%
+  filter(mean != 0) %>%
+  arrange(desc(mean))
+
+#mean loadings
+long_loadings %>%
+  filter (comp == "comp1") %>%
+  group_by(comp, variable) %>%
+  summarise(min= min(value), mean = mean(value), max = max(value), mean_abs = mean(abs(value)))%>%
+  filter(mean != 0) %>%
+  arrange(desc(mean_abs))
+
+#count loadings
+long_loadings %>%
+  filter (comp == "comp1" & value != 0) %>%
+  group_by(comp, variable) %>%
+  count() %>%
+  arrange(desc(n))
+```
+
+#### 2. Buckets
+
+
+##### a) metrics
+```{r metriques BF, message=FALSE, warning=FALSE}
+metrics_fcr_buckets %>%
+  ggplot(aes(variable, value)) +
+  geom_jitter(color = "light grey", size=1.5, alpha=0.30) +
+  geom_boxplot(aes(color=variable))+
+  stat_summary(fun = mean, geom="point", shape=20, size=3, color="black", fill="black") +
+  labs(y= "Metriques", color = "Mesures" )+
+  ggtitle("Mesures pour spls fcr")+
+  facet_wrap(~variable, scale="free")
+
+metrics_fcr_buckets %>%
+  group_by(variable) %>%
+  summarise(min = min(value), mean = mean(value), max = max(value))
+
+metrics_fcr_buckets %>%
+  filter(variable== "MAE") %>%
+  summarise(pourc_range = (mean(value)*100)/(max(df_SC_V3$FCR)-min(df_SC_V3$FCR)), 
+            pourc_mean = (mean(value)*100)/mean(df_SC_V3$FCR))
+```
+
+##### b) loadings
+
+```{r loadings BF, message=FALSE, warning=FALSE}
+long_loadings = reshape2::melt(loadings_fcr_buckets,id.vars=c("rep", "comp"))
+
+#mean loadings
+best_loadings = long_loadings %>%
+  filter (comp == "comp1") %>%
+  group_by(comp, variable) %>%
+  summarise(min= min(value), mean = mean(value), max = max(value), mean_abs = mean(abs(value)))%>%
+  filter(mean != 0) %>%
+  arrange(desc(mean_abs))
+best_loadings
+
+#count loadings
+long_loadings %>%
+  filter (comp == "comp1" & value != 0) %>%
+  group_by(comp, variable) %>%
+  count() %>%
+  arrange(desc(n))
+
+ggplotly(
+  best_loadings %>%
+  ggplot(aes(x=as.numeric(as.character(best_loadings$variable)), y=mean_abs))+
+  geom_col()+
+  annotate(geom = "point", x=metabolites$ppm, y=0, color = "blue", size = 0.5)+
+  annotate(geom="text", x=best_flo_pics, y=-0.005, color = "red", label=best_flo_names, size=2)+
+  annotate(geom = "point", x=best_flo_pics, y=0, color = "red", size = 0.6))
+```
+##### c) Corresponding pics  [ERRORS]
+
+```{r eval=FALSE, include=FALSE}
+best_loadings %>%
+  filter(variable %>% metabolites$variable)
+
+metabolites %>%
+  filter(ppm >= 1.275 & ppm < 1.285)
+
+metabolites %>%
+  filter(metabolite == "B-HydroxyisovalericAcid")
+```
+
+
+#### 3. M+Z+F
+
+##### a) metrics
+```{r metriques AF, message=FALSE, warning=FALSE}
+metrics_fcr_all %>%
+  ggplot(aes(variable, value)) +
+  geom_jitter(color = "light grey", size=1.5, alpha=0.30) +
+  geom_boxplot(aes(color=variable))+
+  stat_summary(fun = mean, geom="point", shape=20, size=3, color="black", fill="black") +
+  labs(y= "Metriques", color = "Mesures" )+
+  ggtitle("Mesures pour spls fcr")+
+  facet_wrap(~variable, scale="free")
+
+metrics_fcr_all %>%
+  group_by(variable) %>%
+  summarise(min = min(value), mean = mean(value), max = max(value))
+
+metrics_fcr_all %>%
+  filter(variable== "MAE") %>%
+  summarise(pourc_range = (mean(value)*100)/(max(df_SC_V3$FCR)-min(df_SC_V3$FCR)), 
+            pourc_mean = (mean(value)*100)/mean(df_SC_V3$FCR))
+```
+
+##### b) loadings
+
+```{r loadings AF, message=FALSE, warning=FALSE}
+long_loadings = reshape2::melt(loadings_fcr_all,id.vars=c("rep", "comp"))
+
+#mean loadings
+best_loadings = long_loadings %>%
+  filter (comp == "comp1") %>%
+  group_by(comp, variable) %>%
+  summarise(min= min(value), mean = mean(value), max = max(value), mean_abs = mean(abs(value)))%>%
+  filter(mean != 0) %>%
+  arrange(desc(mean_abs))
+best_loadings
+
+#count loadings
+long_loadings %>%
+  filter (comp == "comp1" & value != 0) %>%
+  group_by(comp, variable) %>%
+  count() %>%
+  arrange(desc(n))
+
+ggplotly(
+  best_loadings %>%
+  ggplot(aes(x=as.numeric(as.character(best_loadings$variable)), y=mean_abs))+
+  geom_col()+
+  annotate(geom = "point", x=metabolites$ppm, y=0, color = "red", size = 0.5, name =metabolites$metabolite))
+```
+
+***
+
+#### 4. Comparaison {.tabset}
+
+```{r}
+cross.val.results = list(
+  accuracy = list(
+    Z = list(
+      corr_spearman = metrics_fcr_zootech %>%
+        filter(variable == "corr_spearman")%>%
+        select(value)%>%
+        as_vector(),
+      R2 =metrics_fcr_zootech %>%
+        filter(variable == "R2")%>%
+        select(value)%>%
+        as_vector(),
+      MSE =metrics_fcr_zootech %>%
+        filter(variable == "MSE")%>%
+        select(value)%>%
+        as_vector(),
+      RMSE =metrics_fcr_zootech %>%
+        filter(variable == "RMSE")%>%
+        select(value)%>%
+        as_vector(),
+      bias =metrics_fcr_zootech %>%
+        filter(variable == "bias")%>%
+        select(value)%>%
+        as_vector(),
+      MAE =metrics_fcr_zootech %>%
+        filter(variable == "MAE")%>%
+        select(value)%>%
+        as_vector()
+    ),
+    M =list(
+      corr_spearman = metrics_fcr_buckets %>%
+        filter(variable == "corr_spearman")%>%
+        select(value)%>%
+        as_vector(),
+      R2 =metrics_fcr_buckets %>%
+        filter(variable == "R2")%>%
+        select(value)%>%
+        as_vector(),
+      MSE =metrics_fcr_buckets %>%
+        filter(variable == "MSE")%>%
+        select(value)%>%
+        as_vector(),
+      RMSE =metrics_fcr_buckets %>%
+        filter(variable == "RMSE")%>%
+        select(value)%>%
+        as_vector(),
+      bias =metrics_fcr_buckets %>%
+        filter(variable == "bias")%>%
+        select(value)%>%
+        as_vector(),
+      MAE =metrics_fcr_buckets %>%
+        filter(variable == "MAE")%>%
+        select(value)%>%
+        as_vector()
+    ),
+    All =list(
+      corr_spearman = metrics_fcr_all %>%
+        filter(variable == "corr_spearman")%>%
+        select(value)%>%
+        as_vector(),
+      R2 =metrics_fcr_all %>%
+        filter(variable == "R2")%>%
+        select(value)%>%
+        as_vector(),
+      MSE =metrics_fcr_all %>%
+        filter(variable == "MSE")%>%
+        select(value)%>%
+        as_vector(),
+      RMSE =metrics_fcr_all %>%
+        filter(variable == "RMSE")%>%
+        select(value)%>%
+        as_vector(),
+      bias =metrics_fcr_all %>%
+        filter(variable == "bias")%>%
+        select(value)%>%
+        as_vector(),
+      MAE =metrics_fcr_all %>%
+        filter(variable == "MAE")%>%
+        select(value)%>%
+        as_vector()
+    )
+    
+  ),
+  n_training_instances = nech_sum[[1]],
+  n_testing_instances = nech_sum[[2]],
+  number.of.rep = 50,
+  number.of.folds = 5
+)
+```
+
+```{r}
+comp = algo.test(cross.val.results)
+```
+
+##### a) R2
+
+```{r}
+table = data.frame(diet_seq = rep("DAC",3),
+           outcome = rep("fcr",3), 
+           Predictors = comp$summary$algo[13:15],
+           R2 = data.frame(R2 = c(mean(cross.val.results$accuracy$Z$R2),mean(cross.val.results$accuracy$M$R2),mean(cross.val.results$accuracy$All$R2))),
+           sd = gsub('[()]', '',comp$summary$`(sd)`)[13:15],
+           letter = comp$summary$letter[13:15])
+
+table$letter = as_factor(table$letter)
+table$sd = as.numeric(table$sd)
+
+```
+
+```{r Plot comp fcr}
+p_fcr <-ggplot(table, aes(x=outcome, y=R2, fill=Predictors)) +
+  #barplot
+  geom_col(width = 0.5,#bar width
+           position = position_dodge(0.6),#space between bars on the same x
+           colour="black", size=0.2)+#colour and size of bar lines
+  scale_fill_manual(values=c("#9dc544", "#00a3a6","#423089"),#colors of bars
+                    name="Predictor set:")+#name for the legend
+  #error bars
+  geom_errorbar(aes(ymin=R2, ymax=R2+sign(R2)*sd),#length of error bars
+                 width=0.2,#width of error bars
+                 position=position_dodge(0.6),#space between bars on the same x
+                stat="identity")+
+  #letters to indicate significant differences or non significant
+  geom_text(aes(label = letter,#name of the variable used for labelling
+                y = R2 + sign(R2)*sd +sign(R2)*0.05),#vertical position of the letter
+            position = position_dodge(0.6),#space between bars on the same x
+            family="Raleway", size=4.5)+#letter label style
+  #theme
+  theme_classic()+
+  #legend
+  theme(legend.position="top")+#legend position
+  theme(legend.title = element_text(colour="black", size=11, family="Raleway"))+#legend title style
+  theme(legend.text = element_text(colour="black", size=10, family="sans"))+#legend text style
+  #grid style
+  theme(panel.grid.major.y = element_line(color = "grey80", size = 0.5, linetype = 1))+#horizontal grid style
+  #x axis
+  xlab("Predicted outcome")+#x axis title
+  theme(axis.title.x = element_text(colour="black", size=10, family="Raleway SemiBold", vjust=-0.8))+# x axis title style
+  theme(axis.text.x = element_text(colour="grey30", size=10, family="sans"))+# x axis text style
+  #y axis
+  ylab("R2")+#y axis title
+  theme(axis.title.y = element_text(colour="black", size=10, family="Raleway SemiBold", vjust=+2))+# y axis title style
+  theme(axis.text.y = element_text(colour="grey30", size=10, family="sans"))
+
+p_fcr
+```
+
+##### b) MAE
+```{r}
+table = data.frame(diet_seq = rep("DAC",3),
+           outcome = rep("fcr",3), 
+           Predictors = comp$summary$algo[13:15],
+           MAE = data.frame(MAE = c(mean(cross.val.results$accuracy$Z$MAE),mean(cross.val.results$accuracy$M$MAE),mean(cross.val.results$accuracy$All$MAE))),
+           sd = gsub('[()]', '',comp$summary$`(sd)`)[13:15],
+           letter = comp$summary$letter[13:15])
+
+table$letter = as_factor(table$letter)
+table$sd = as.numeric(table$sd)
+```
+
+```{r}
+p_fcr_MAE <-ggplot(table, aes(x=outcome, y=MAE, fill=Predictors)) +
+  #barplot
+  geom_col(width = 0.5,#bar width
+           position = position_dodge(0.6),#space between bars on the same x
+           colour="black", size=0.2)+#colour and size of bar lines
+  scale_fill_manual(values=c("#E8A0BF", "#C689C6","#937DC2"),#colors of bars
+                    name="Predictor set:")+#name for the legend
+  #error bars
+  geom_errorbar(aes(ymin=MAE, ymax=MAE+sign(MAE)*sd),#length of error bars
+                 width=0.2,#width of error bars
+                 position=position_dodge(0.6),#space between bars on the same x
+                stat="identity")+
+  #letters to indicate significant differences or non significant
+  geom_text(aes(label = letter,#name of the variable used for labelling
+                y = MAE + sign(MAE)*sd +sign(MAE)*0.05),#vertical position of the letter
+            position = position_dodge(0.6),#space between bars on the same x
+            family="Raleway", size=4.5)+#letter label style
+  #theme
+  theme_classic()+
+  #legend
+  theme(legend.position="top")+#legend position
+  theme(legend.title = element_text(colour="black", size=11, family="Raleway"))+#legend title style
+  theme(legend.text = element_text(colour="black", size=10, family="sans"))+#legend text style
+  #grid style
+  theme(panel.grid.major.y = element_line(color = "grey80", size = 0.5, linetype = 1))+#horizontal grid style
+  #x axis
+  xlab("Predicted outcome")+#x axis title
+  theme(axis.title.x = element_text(colour="black", size=10, family="Raleway SemiBold", vjust=-0.8))+# x axis title style
+  theme(axis.text.x = element_text(colour="grey30", size=10, family="sans"))+# x axis text style
+  #y axis
+  ylab("MAE")+#y axis title
+  theme(axis.title.y = element_text(colour="black", size=10, family="Raleway SemiBold", vjust=+2))+# y axis title style
+  theme(axis.text.y = element_text(colour="grey30", size=10, family="sans"))
+
+p_fcr_MAE
+```
+
+##### c) corr_spearman
+```{r}
+table = data.frame(diet_seq = rep("DAC",3),
+           outcome = rep("fcr",3), 
+           Predictors = comp$summary$algo[13:15],
+           corr_spearman = data.frame(corr_spearman = c(mean(cross.val.results$accuracy$Z$corr_spearman),mean(cross.val.results$accuracy$M$corr_spearman),mean(cross.val.results$accuracy$All$corr_spearman))),
+           sd = gsub('[()]', '',comp$summary$`(sd)`)[13:15],
+           letter = comp$summary$letter[13:15])
+
+table$letter = as_factor(table$letter)
+table$sd = as.numeric(table$sd)
+```
+
+```{r}
+p_fcr_sp <-ggplot(table, aes(x=outcome, y=corr_spearman, fill=Predictors)) +
+  #barplot
+  geom_col(width = 0.5,#bar width
+           position = position_dodge(0.6),#space between bars on the same x
+           colour="black", size=0.2)+#colour and size of bar lines
+  scale_fill_manual(values=c("#F9D5A7", "#FFB085","#FFA400"),#colors of bars
+                    name="Predictor set:")+#name for the legend
+  #error bars
+  geom_errorbar(aes(ymin=corr_spearman, ymax=corr_spearman+sign(corr_spearman)*sd),#length of error bars
+                 width=0.2,#width of error bars
+                 position=position_dodge(0.6),#space between bars on the same x
+                stat="identity")+
+  #letters to indicate significant differences or non significant
+  geom_text(aes(label = letter,#name of the variable used for labelling
+                y = corr_spearman + sign(corr_spearman)*sd +sign(corr_spearman)*0.05),#vertical position of the letter
+            position = position_dodge(0.6),#space between bars on the same x
+            family="Raleway", size=4.5)+#letter label style
+  #theme
+  theme_classic()+
+  #legend
+  theme(legend.position="top")+#legend position
+  theme(legend.title = element_text(colour="black", size=11, family="Raleway"))+#legend title style
+  theme(legend.text = element_text(colour="black", size=10, family="sans"))+#legend text style
+  #grid style
+  theme(panel.grid.major.y = element_line(color = "grey80", size = 0.5, linetype = 1))+#horizontal grid style
+  #x axis
+  xlab("Predicted outcome")+#x axis title
+  theme(axis.title.x = element_text(colour="black", size=10, family="Raleway SemiBold", vjust=-0.8))+# x axis title style
+  theme(axis.text.x = element_text(colour="grey30", size=10, family="sans"))+# x axis text style
+  #y axis
+  ylab("corr_spearman")+#y axis title
+  theme(axis.title.y = element_text(colour="black", size=10, family="Raleway SemiBold", vjust=+2))+# y axis title style
+  theme(axis.text.y = element_text(colour="grey30", size=10, family="sans"))
+
+p_fcr_sp
+```
+
+##### d) Boxplots R2
+```{r}
+R2_fcr = metrics_fcr_zootech %>%
+  filter(variable == "R2") %>%
+  add_column("pred" = rep("zootech", 250)) %>%
+  rbind(
+metrics_fcr_buckets%>%
+  filter(variable == "R2") %>%
+  add_column("pred" = rep("buckets", 250))
+) %>%
+  rbind(
+metrics_fcr_all%>%
+  filter(variable == "R2") %>%
+  add_column("pred" = rep("all", 250))
+)
+```
+
+```{r}
+R2_fcr = R2_fcr %>%
+    tidyr::spread(pred, value) %>%
+    dplyr::mutate(is_increasing_all = all >= zootech) %>%
+  dplyr::mutate(is_increasing_bucket = buckets >= zootech)%>%
+    tidyr::gather("pred", "value", 3:5)
+
+R2_fcr %>%
+  filter(pred != "all")%>%
+  ggplot(aes(x= pred, y=value))+
+  geom_boxplot()+
+  geom_point(aes(group=id),color = "black", size=1.5, alpha=0.30)+
+  geom_line(aes(group=id, color = if_else(is_increasing_bucket == F, "light blue", "light red")), show.legend = F)
+
+R2_fcr %>%
+  filter(pred != "buckets")%>%
+  ggplot(aes(x= pred, y=value))+
+  geom_boxplot()+
+  geom_point(aes(group=id),color = "black", size=1.5, alpha=0.30)+
+  geom_line(aes(group=id, color = if_else(is_increasing_all == F, "light blue", "light red")), show.legend = F)
+
+R2_fcr %>%
+  filter(pred == "all")%>%
+  group_by(is_increasing_all) %>%
+  count()%>%
+  mutate (pour = (n*100)/250)
+
+R2_fcr %>%
+  filter(pred == "buckets")%>%
+  group_by(is_increasing_bucket) %>%
+  count() %>%
+  mutate (pour = (n*100)/250)
+
+
+``` 
+
+
+##### e) Boxplots MAE
+
+```{r}
+MAE_fcr = metrics_fcr_zootech %>%
+  filter(variable == "MAE") %>%
+  add_column("pred" = rep("zootech", 250)) %>%
+  rbind(
+metrics_fcr_buckets%>%
+  filter(variable == "MAE") %>%
+  add_column("pred" = rep("buckets", 250))
+) %>%
+  rbind(
+metrics_fcr_all%>%
+  filter(variable == "MAE") %>%
+  add_column("pred" = rep("all", 250))
+)
+```
+
+```{r}
+MAE_fcr = MAE_fcr %>%
+    tidyr::spread(pred, value) %>%
+    dplyr::mutate(is_decreasing_all = all <= zootech) %>%
+  dplyr::mutate(is_decreasing_bucket = buckets <= zootech)%>%
+    tidyr::gather("pred", "value", 3:5)
+
+MAE_fcr %>%
+  filter(pred != "all")%>%
+  ggplot(aes(x= pred, y=value))+
+  geom_boxplot()+
+  geom_point(aes(group=id),color = "black", size=1.5, alpha=0.30)+
+  geom_line(aes(group=id, color = if_else(is_decreasing_bucket == F, "light blue", "light red")), show.legend = F)
+
+MAE_fcr %>%
+  filter(pred != "buckets")%>%
+  ggplot(aes(x= pred, y=value))+
+  geom_boxplot()+
+  geom_point(aes(group=id),color = "black", size=1.5, alpha=0.30)+
+  geom_line(aes(group=id, color = if_else(is_decreasing_all == F, "light blue", "light red")), show.legend = F)
+
+MAE_fcr %>%
+  filter(pred == "all")%>%
+  group_by(is_decreasing_all) %>%
+  count()%>%
+  mutate (pour = (n*100)/250)
+
+MAE_fcr %>%
+  filter(pred == "buckets")%>%
+  group_by(is_decreasing_bucket) %>%
+  count() %>%
+  mutate (pour = (n*100)/250)
+
+
+```
+
+##### f) Boxplots spearman
+```{r}
+corr_spearman_fcr = metrics_fcr_zootech %>%
+  filter(variable == "corr_spearman") %>%
+  add_column("pred" = rep("zootech", 250)) %>%
+  rbind(
+metrics_fcr_buckets%>%
+  filter(variable == "corr_spearman") %>%
+  add_column("pred" = rep("buckets", 250))
+) %>%
+  rbind(
+metrics_fcr_all%>%
+  filter(variable == "corr_spearman") %>%
+  add_column("pred" = rep("all", 250))
+)
+```
+
+```{r}
+corr_spearman_fcr = corr_spearman_fcr %>%
+    tidyr::spread(pred, value) %>%
+    dplyr::mutate(is_increasing_all = all >= zootech) %>%
+  dplyr::mutate(is_increasing_bucket = buckets >= zootech)%>%
+    tidyr::gather("pred", "value", 3:5)
+
+corr_spearman_fcr %>%
+  filter(pred != "all")%>%
+  ggplot(aes(x= pred, y=value))+
+  geom_boxplot()+
+  geom_point(aes(group=id),color = "black", size=1.5, alpha=0.30)+
+  geom_line(aes(group=id, color = if_else(is_increasing_bucket == F, "light blue", "light red")), show.legend = F)
+
+corr_spearman_fcr %>%
+  filter(pred != "buckets")%>%
+  ggplot(aes(x= pred, y=value))+
+  geom_boxplot()+
+  geom_point(aes(group=id),color = "black", size=1.5, alpha=0.30)+
+  geom_line(aes(group=id, color = if_else(is_increasing_all == F, "light blue", "light red")), show.legend = F)
+
+corr_spearman_fcr %>%
+  filter(pred == "all")%>%
+  group_by(is_increasing_all) %>%
+  count()%>%
+  mutate (pour = (n*100)/250)
+
+corr_spearman_fcr %>%
+  filter(pred == "buckets")%>%
+  group_by(is_increasing_bucket) %>%
+  count() %>%
+  mutate (pour = (n*100)/250)
+
+
+``` 
+
+***
+
+### III. Prediction de la RFI {.tabset}
+
+```{r data RFI, message=FALSE, warning=FALSE}
+#Zootechnie
+loadings_rfi_zootech = read_tsv("for_cluster/output_V3/model250/rfi/loadings_rfi_zootech_SC_V3.tsv")
+metrics_rfi_zootech =read_tsv("for_cluster/output_V3/model250/rfi/metrics_rfi_zootech_SC_V3.tsv")
+  
+#Buckets
+loadings_rfi_buckets = read_tsv("for_cluster/output_V3/model250/rfi/loadings_rfi_buckets_SC_V3.tsv")
+metrics_rfi_buckets = read_tsv("for_cluster/output_V3/model250/rfi/metrics_rfi_buckets_SC_V3.tsv")
+
+#All
+loadings_rfi_all = read_tsv("for_cluster/output_V3/model250/rfi/loadings_rfi_all_SC_V3.tsv")
+metrics_rfi_all = read_tsv("for_cluster/output_V3/model250/rfi/metrics_rfi_all_SC_V3.tsv")
+```
+
+***
+
+#### 1. Zootechnie + Fixes
+
+##### a) metrics
+```{r metriques ZR, message=FALSE, warning=FALSE}
+metrics_rfi_zootech %>%
+  ggplot(aes(variable, value)) +
+  geom_jitter(color = "light grey", size=1.5, alpha=0.30) +
+  geom_boxplot(aes(color=variable))+
+  stat_summary(fun = mean, geom="point", shape=20, size=3, color="black", fill="black") +
+  labs(y= "Metriques", color = "Mesures" )+
+  ggtitle("Mesures pour spls rfi")+
+  facet_wrap(~variable, scale="free")
+
+metrics_rfi_zootech %>%
+  group_by(variable) %>%
+  summarise(min = min(value), mean = mean(value), max = max(value))
+
+metrics_rfi_zootech %>%
+  filter(variable== "MAE") %>%
+  summarise(pourc_range = (mean(value)*100)/(max(df_SC_V3$newRFI)-min(df_SC_V3$newRFI)))
+```
+
+##### b) loadings
+
+```{r loadings ZR, message=FALSE, warning=FALSE}
+long_loadings = reshape2::melt(loadings_rfi_zootech,id.vars=c("rep", "comp"))
+
+long_loadings %>%
+  filter(comp == "comp1")%>%
+  ggplot(aes(variable, value)) +
+  geom_jitter(color = "light grey", size=1.5, alpha=0.30) +
+  geom_boxplot(aes(color=variable))+
+  labs(y= "Loadings", color = "Variables" )+
+  ggtitle("Loadings pour composante 1")
+
+long_loadings %>%
+  filter(comp == "comp2")%>%
+  ggplot(aes(variable, value)) +
+  geom_jitter(color = "light grey", size=1.5, alpha=0.30) +
+  geom_boxplot(aes(color=variable))+
+  labs(y= "Loadings", color = "Variables" )+
+  ggtitle("Loadings pour composante 2")
+
+long_loadings %>%
+  filter (comp == "comp1") %>%
+  group_by(comp, variable) %>%
+  summarise(mean = mean(value))%>%
+  filter(mean != 0) %>%
+  arrange(desc(mean))
+
+#mean loadings
+long_loadings %>%
+  filter (comp == "comp1") %>%
+  group_by(comp, variable) %>%
+  summarise(min= min(value), mean = mean(value), max = max(value), mean_abs = mean(abs(value)))%>%
+  filter(mean != 0) %>%
+  arrange(desc(mean_abs))
+
+#count loadings
+long_loadings %>%
+  filter (comp == "comp1" & value != 0) %>%
+  group_by(comp, variable) %>%
+  count() %>%
+  arrange(desc(n))
+```
+
+#### 2. Buckets
+
+
+##### a) metrics
+```{r metriques BR, message=FALSE, warning=FALSE}
+metrics_rfi_buckets %>%
+  ggplot(aes(variable, value)) +
+  geom_jitter(color = "light grey", size=1.5, alpha=0.30) +
+  geom_boxplot(aes(color=variable))+
+  stat_summary(fun = mean, geom="point", shape=20, size=3, color="black", fill="black") +
+  labs(y= "Metriques", color = "Mesures" )+
+  ggtitle("Mesures pour spls rfi")+
+  facet_wrap(~variable, scale="free")
+
+metrics_rfi_buckets %>%
+  group_by(variable) %>%
+  summarise(min = min(value), mean = mean(value), max = max(value))
+
+metrics_rfi_buckets %>%
+  filter(variable== "MAE") %>%
+  summarise(pourc_range = (mean(value)*100)/(max(df_SC_V3$newRFI)-min(df_SC_V3$newRFI)))
+```
+
+##### b) loadings
+
+```{r loadings BR, message=FALSE, warning=FALSE}
+long_loadings = reshape2::melt(loadings_rfi_buckets,id.vars=c("rep", "comp"))
+
+#mean loadings
+best_loadings = long_loadings %>%
+  filter (comp == "comp1") %>%
+  group_by(comp, variable) %>%
+  summarise(min= min(value), mean = mean(value), max = max(value), mean_abs = mean(abs(value)))%>%
+  filter(mean != 0) %>%
+  arrange(desc(mean_abs))
+best_loadings
+
+#count loadings
+long_loadings %>%
+  filter (comp == "comp1" & value != 0) %>%
+  group_by(comp, variable) %>%
+  count() %>%
+  arrange(desc(n))
+
+ggplotly(
+  best_loadings %>%
+  ggplot(aes(x=as.numeric(as.character(best_loadings$variable)), y=mean_abs))+
+  geom_col()+
+  annotate(geom = "point", x=metabolites$ppm, y=0, color = "blue", size = 0.5)+
+  annotate(geom="text", x=best_flo_pics, y=-0.005, color = "red", label=best_flo_names, size=2)+
+  annotate(geom = "point", x=best_flo_pics, y=0, color = "red", size = 0.6))
+```
+##### c) Corresponding pics  [ERRORS]
+
+```{r eval=FALSE, include=FALSE}
+best_loadings %>%
+  filter(variable %>% metabolites$variable)
+
+metabolites %>%
+  filter(ppm >= 1.275 & ppm < 1.285)
+
+metabolites %>%
+  filter(metabolite == "B-HydroxyisovalericAcid")
+```
+
+
+#### 3. M+Z+F
+
+##### a) metrics
+```{r metriques AR, message=FALSE, warning=FALSE}
+metrics_rfi_all %>%
+  ggplot(aes(variable, value)) +
+  geom_jitter(color = "light grey", size=1.5, alpha=0.30) +
+  geom_boxplot(aes(color=variable))+
+  stat_summary(fun = mean, geom="point", shape=20, size=3, color="black", fill="black") +
+  labs(y= "Metriques", color = "Mesures" )+
+  ggtitle("Mesures pour spls rfi")+
+  facet_wrap(~variable, scale="free")
+
+metrics_rfi_all %>%
+  group_by(variable) %>%
+  summarise(min = min(value), mean = mean(value), max = max(value))
+
+metrics_rfi_all %>%
+  filter(variable== "MAE") %>%
+  summarise(pourc_range = (mean(value)*100)/(max(df_SC_V3$newRFI)-min(df_SC_V3$newRFI)))
+```
+
+##### b) loadings
+
+```{r loadings AR, message=FALSE, warning=FALSE}
+long_loadings = reshape2::melt(loadings_rfi_all,id.vars=c("rep", "comp"))
+
+#mean loadings
+best_loadings = long_loadings %>%
+  filter (comp == "comp1") %>%
+  group_by(comp, variable) %>%
+  summarise(min= min(value), mean = mean(value), max = max(value), mean_abs = mean(abs(value)))%>%
+  filter(mean != 0) %>%
+  arrange(desc(mean_abs))
+best_loadings
+
+#count loadings
+long_loadings %>%
+  filter (comp == "comp1" & value != 0) %>%
+  group_by(comp, variable) %>%
+  count() %>%
+  arrange(desc(n))
+
+ggplotly(
+  best_loadings %>%
+  ggplot(aes(x=as.numeric(as.character(best_loadings$variable)), y=mean_abs))+
+  geom_col()+
+   annotate(geom = "point", x=metabolites$ppm, y=0, color = "blue", size = 0.5)+
+  annotate(geom="text", x=best_flo_pics, y=-0.005, color = "red", label=best_flo_names, size=2)+
+  annotate(geom = "point", x=best_flo_pics, y=0, color = "red", size = 0.6))
+```
+
+#### 4. Comparaison {.tabset}
+
+```{r}
+cross.val.results = list(
+  accuracy = list(
+    Z = list(
+      corr_spearman = metrics_rfi_zootech %>%
+        filter(variable == "corr_spearman")%>%
+        select(value)%>%
+        as_vector(),
+      R2 =metrics_rfi_zootech %>%
+        filter(variable == "R2")%>%
+        select(value)%>%
+        as_vector(),
+      MSE =metrics_rfi_zootech %>%
+        filter(variable == "MSE")%>%
+        select(value)%>%
+        as_vector(),
+      RMSE =metrics_rfi_zootech %>%
+        filter(variable == "RMSE")%>%
+        select(value)%>%
+        as_vector(),
+      bias =metrics_rfi_zootech %>%
+        filter(variable == "bias")%>%
+        select(value)%>%
+        as_vector(),
+      MAE =metrics_rfi_zootech %>%
+        filter(variable == "MAE")%>%
+        select(value)%>%
+        as_vector()
+    ),
+    M =list(
+      corr_spearman = metrics_rfi_buckets %>%
+        filter(variable == "corr_spearman")%>%
+        select(value)%>%
+        as_vector(),
+      R2 =metrics_rfi_buckets %>%
+        filter(variable == "R2")%>%
+        select(value)%>%
+        as_vector(),
+      MSE =metrics_rfi_buckets %>%
+        filter(variable == "MSE")%>%
+        select(value)%>%
+        as_vector(),
+      RMSE =metrics_rfi_buckets %>%
+        filter(variable == "RMSE")%>%
+        select(value)%>%
+        as_vector(),
+      bias =metrics_rfi_buckets %>%
+        filter(variable == "bias")%>%
+        select(value)%>%
+        as_vector(),
+      MAE =metrics_rfi_buckets %>%
+        filter(variable == "MAE")%>%
+        select(value)%>%
+        as_vector()
+    ),
+    All =list(
+      corr_spearman = metrics_rfi_all %>%
+        filter(variable == "corr_spearman")%>%
+        select(value)%>%
+        as_vector(),
+      R2 =metrics_rfi_all %>%
+        filter(variable == "R2")%>%
+        select(value)%>%
+        as_vector(),
+      MSE =metrics_rfi_all %>%
+        filter(variable == "MSE")%>%
+        select(value)%>%
+        as_vector(),
+      RMSE =metrics_rfi_all %>%
+        filter(variable == "RMSE")%>%
+        select(value)%>%
+        as_vector(),
+      bias =metrics_rfi_all %>%
+        filter(variable == "bias")%>%
+        select(value)%>%
+        as_vector(),
+      MAE =metrics_rfi_all %>%
+        filter(variable == "MAE")%>%
+        select(value)%>%
+        as_vector()
+    )
+    
+  ),
+  n_training_instances = nech_sum[[1]],
+  n_testing_instances = nech_sum[[2]],
+  number.of.rep = 50,
+  number.of.folds = 5
+)
+```
+
+```{r}
+comp = algo.test(cross.val.results)
+```
+##### a) R2
+
+```{r}
+table = data.frame(diet_seq = rep("DAC",3),
+           outcome = rep("rfi",3), 
+           Predictors = comp$summary$algo[13:15],
+           R2 = data.frame(R2 = c(mean(cross.val.results$accuracy$Z$R2),mean(cross.val.results$accuracy$M$R2),mean(cross.val.results$accuracy$All$R2))),
+           sd = gsub('[()]', '',comp$summary$`(sd)`)[13:15],
+           letter = comp$summary$letter[13:15])
+
+table$letter = as_factor(table$letter)
+table$sd = as.numeric(table$sd)
+
+```
+
+```{r Plot comp rfi}
+p_rfi <-ggplot(table, aes(x=outcome, y=R2, fill=Predictors)) +
+  #barplot
+  geom_col(width = 0.5,#bar width
+           position = position_dodge(0.6),#space between bars on the same x
+           colour="black", size=0.2)+#colour and size of bar lines
+  scale_fill_manual(values=c("#9dc544", "#00a3a6","#423089"),#colors of bars
+                    name="Predictor set:")+#name for the legend
+  #error bars
+  geom_errorbar(aes(ymin=R2, ymax=R2+sign(R2)*sd),#length of error bars
+                 width=0.2,#width of error bars
+                 position=position_dodge(0.6),#space between bars on the same x
+                stat="identity")+
+  #letters to indicate significant differences or non significant
+  geom_text(aes(label = letter,#name of the variable used for labelling
+                y = R2 + sign(R2)*sd +sign(R2)*0.05),#vertical position of the letter
+            position = position_dodge(0.6),#space between bars on the same x
+            family="Raleway", size=4.5)+#letter label style
+  #theme
+  theme_classic()+
+  #legend
+  theme(legend.position="top")+#legend position
+  theme(legend.title = element_text(colour="black", size=11, family="Raleway"))+#legend title style
+  theme(legend.text = element_text(colour="black", size=10, family="sans"))+#legend text style
+  #grid style
+  theme(panel.grid.major.y = element_line(color = "grey80", size = 0.5, linetype = 1))+#horizontal grid style
+  #x axis
+  xlab("Predicted outcome")+#x axis title
+  theme(axis.title.x = element_text(colour="black", size=10, family="Raleway SemiBold", vjust=-0.8))+# x axis title style
+  theme(axis.text.x = element_text(colour="grey30", size=10, family="sans"))+# x axis text style
+  #y axis
+  ylab("R2")+#y axis title
+  theme(axis.title.y = element_text(colour="black", size=10, family="Raleway SemiBold", vjust=+2))+# y axis title style
+  theme(axis.text.y = element_text(colour="grey30", size=10, family="sans"))
+
+p_rfi
+```
+
+##### b) MAE
+```{r}
+table = data.frame(diet_seq = rep("DAC",3),
+           outcome = rep("rfi",3), 
+           Predictors = comp$summary$algo[13:15],
+           MAE = data.frame(MAE = c(mean(cross.val.results$accuracy$Z$MAE),mean(cross.val.results$accuracy$M$MAE),mean(cross.val.results$accuracy$All$MAE))),
+           sd = gsub('[()]', '',comp$summary$`(sd)`)[13:15],
+           letter = comp$summary$letter[13:15])
+
+table$letter = as_factor(table$letter)
+table$sd = as.numeric(table$sd)
+```
+
+```{r}
+p_rfi_MAE <-ggplot(table, aes(x=outcome, y=MAE, fill=Predictors)) +
+  #barplot
+  geom_col(width = 0.5,#bar width
+           position = position_dodge(0.6),#space between bars on the same x
+           colour="black", size=0.2)+#colour and size of bar lines
+  scale_fill_manual(values=c("#E8A0BF", "#C689C6","#937DC2"),#colors of bars
+                    name="Predictor set:")+#name for the legend
+  #error bars
+  geom_errorbar(aes(ymin=MAE, ymax=MAE+sign(MAE)*sd),#length of error bars
+                 width=0.2,#width of error bars
+                 position=position_dodge(0.6),#space between bars on the same x
+                stat="identity")+
+  #letters to indicate significant differences or non significant
+  geom_text(aes(label = letter,#name of the variable used for labelling
+                y = MAE + sign(MAE)*sd +sign(MAE)*0.05),#vertical position of the letter
+            position = position_dodge(0.6),#space between bars on the same x
+            family="Raleway", size=4.5)+#letter label style
+  #theme
+  theme_classic()+
+  #legend
+  theme(legend.position="top")+#legend position
+  theme(legend.title = element_text(colour="black", size=11, family="Raleway"))+#legend title style
+  theme(legend.text = element_text(colour="black", size=10, family="sans"))+#legend text style
+  #grid style
+  theme(panel.grid.major.y = element_line(color = "grey80", size = 0.5, linetype = 1))+#horizontal grid style
+  #x axis
+  xlab("Predicted outcome")+#x axis title
+  theme(axis.title.x = element_text(colour="black", size=10, family="Raleway SemiBold", vjust=-0.8))+# x axis title style
+  theme(axis.text.x = element_text(colour="grey30", size=10, family="sans"))+# x axis text style
+  #y axis
+  ylab("MAE")+#y axis title
+  theme(axis.title.y = element_text(colour="black", size=10, family="Raleway SemiBold", vjust=+2))+# y axis title style
+  theme(axis.text.y = element_text(colour="grey30", size=10, family="sans"))
+
+p_rfi_MAE
+```
+
+##### c) corr_spearman
+```{r}
+table = data.frame(diet_seq = rep("DAC",3),
+           outcome = rep("rfi",3), 
+           Predictors = comp$summary$algo[13:15],
+           corr_spearman = data.frame(corr_spearman = c(mean(cross.val.results$accuracy$Z$corr_spearman),mean(cross.val.results$accuracy$M$corr_spearman),mean(cross.val.results$accuracy$All$corr_spearman))),
+           sd = gsub('[()]', '',comp$summary$`(sd)`)[13:15],
+           letter = comp$summary$letter[13:15])
+
+table$letter = as_factor(table$letter)
+table$sd = as.numeric(table$sd)
+```
+
+```{r}
+p_rfi_sp <-ggplot(table, aes(x=outcome, y=corr_spearman, fill=Predictors)) +
+  #barplot
+  geom_col(width = 0.5,#bar width
+           position = position_dodge(0.6),#space between bars on the same x
+           colour="black", size=0.2)+#colour and size of bar lines
+  scale_fill_manual(values=c("#F9D5A7", "#FFB085","#FFA400"),#colors of bars
+                    name="Predictor set:")+#name for the legend
+  #error bars
+  geom_errorbar(aes(ymin=corr_spearman, ymax=corr_spearman+sign(corr_spearman)*sd),#length of error bars
+                 width=0.2,#width of error bars
+                 position=position_dodge(0.6),#space between bars on the same x
+                stat="identity")+
+  #letters to indicate significant differences or non significant
+  geom_text(aes(label = letter,#name of the variable used for labelling
+                y = corr_spearman + sign(corr_spearman)*sd +sign(corr_spearman)*0.05),#vertical position of the letter
+            position = position_dodge(0.6),#space between bars on the same x
+            family="Raleway", size=4.5)+#letter label style
+  #theme
+  theme_classic()+
+  #legend
+  theme(legend.position="top")+#legend position
+  theme(legend.title = element_text(colour="black", size=11, family="Raleway"))+#legend title style
+  theme(legend.text = element_text(colour="black", size=10, family="sans"))+#legend text style
+  #grid style
+  theme(panel.grid.major.y = element_line(color = "grey80", size = 0.5, linetype = 1))+#horizontal grid style
+  #x axis
+  xlab("Predicted outcome")+#x axis title
+  theme(axis.title.x = element_text(colour="black", size=10, family="Raleway SemiBold", vjust=-0.8))+# x axis title style
+  theme(axis.text.x = element_text(colour="grey30", size=10, family="sans"))+# x axis text style
+  #y axis
+  ylab("corr_spearman")+#y axis title
+  theme(axis.title.y = element_text(colour="black", size=10, family="Raleway SemiBold", vjust=+2))+# y axis title style
+  theme(axis.text.y = element_text(colour="grey30", size=10, family="sans"))
+
+p_rfi_sp
+```
+
+##### d) Boxplots R2
+```{r}
+R2_rfi = metrics_rfi_zootech %>%
+  filter(variable == "R2") %>%
+  add_column("pred" = rep("zootech", 250)) %>%
+  rbind(
+metrics_rfi_buckets%>%
+  filter(variable == "R2") %>%
+  add_column("pred" = rep("buckets", 250))
+) %>%
+  rbind(
+metrics_rfi_all%>%
+  filter(variable == "R2") %>%
+  add_column("pred" = rep("all", 250))
+)
+```
+
+```{r}
+R2_rfi = R2_rfi %>%
+    tidyr::spread(pred, value) %>%
+    dplyr::mutate(is_increasing_all = all >= zootech) %>%
+  dplyr::mutate(is_increasing_bucket = buckets >= zootech)%>%
+    tidyr::gather("pred", "value", 3:5)
+
+R2_rfi %>%
+  filter(pred != "all")%>%
+  ggplot(aes(x= pred, y=value))+
+  geom_boxplot()+
+  geom_point(aes(group=id),color = "black", size=1.5, alpha=0.30)+
+  geom_line(aes(group=id, color = if_else(is_increasing_bucket == F, "light blue", "light red")), show.legend = F)
+
+R2_rfi %>%
+  filter(pred != "buckets")%>%
+  ggplot(aes(x= pred, y=value))+
+  geom_boxplot()+
+  geom_point(aes(group=id),color = "black", size=1.5, alpha=0.30)+
+  geom_line(aes(group=id, color = if_else(is_increasing_all == F, "light blue", "light red")), show.legend = F)
+
+R2_rfi %>%
+  filter(pred == "all")%>%
+  group_by(is_increasing_all) %>%
+  count()%>%
+  mutate (pour = (n*100)/250)
+
+R2_rfi %>%
+  filter(pred == "buckets")%>%
+  group_by(is_increasing_bucket) %>%
+  count() %>%
+  mutate (pour = (n*100)/250)
+
+
+``` 
+
+
+##### e) Boxplots MAE
+
+```{r}
+MAE_rfi = metrics_rfi_zootech %>%
+  filter(variable == "MAE") %>%
+  add_column("pred" = rep("zootech", 250)) %>%
+  rbind(
+metrics_rfi_buckets%>%
+  filter(variable == "MAE") %>%
+  add_column("pred" = rep("buckets", 250))
+) %>%
+  rbind(
+metrics_rfi_all%>%
+  filter(variable == "MAE") %>%
+  add_column("pred" = rep("all", 250))
+)
+```
+
+```{r}
+MAE_rfi = MAE_rfi %>%
+    tidyr::spread(pred, value) %>%
+    dplyr::mutate(is_decreasing_all = all <= zootech) %>%
+  dplyr::mutate(is_decreasing_bucket = buckets <= zootech)%>%
+    tidyr::gather("pred", "value", 3:5)
+
+MAE_rfi %>%
+  filter(pred != "all")%>%
+  ggplot(aes(x= pred, y=value))+
+  geom_boxplot()+
+  geom_point(aes(group=id),color = "black", size=1.5, alpha=0.30)+
+  geom_line(aes(group=id, color = if_else(is_decreasing_bucket == F, "light blue", "light red")), show.legend = F)
+
+MAE_rfi %>%
+  filter(pred != "buckets")%>%
+  ggplot(aes(x= pred, y=value))+
+  geom_boxplot()+
+  geom_point(aes(group=id),color = "black", size=1.5, alpha=0.30)+
+  geom_line(aes(group=id, color = if_else(is_decreasing_all == F, "light blue", "light red")), show.legend = F)
+
+MAE_rfi %>%
+  filter(pred == "all")%>%
+  group_by(is_decreasing_all) %>%
+  count()%>%
+  mutate (pour = (n*100)/250)
+
+MAE_rfi %>%
+  filter(pred == "buckets")%>%
+  group_by(is_decreasing_bucket) %>%
+  count() %>%
+  mutate (pour = (n*100)/250)
+
+
+```
+
+##### f) Boxplots spearman
+```{r}
+corr_spearman_rfi = metrics_rfi_zootech %>%
+  filter(variable == "corr_spearman") %>%
+  add_column("pred" = rep("zootech", 250)) %>%
+  rbind(
+metrics_rfi_buckets%>%
+  filter(variable == "corr_spearman") %>%
+  add_column("pred" = rep("buckets", 250))
+) %>%
+  rbind(
+metrics_rfi_all%>%
+  filter(variable == "corr_spearman") %>%
+  add_column("pred" = rep("all", 250))
+)
+```
+
+```{r}
+corr_spearman_rfi = corr_spearman_rfi %>%
+    tidyr::spread(pred, value) %>%
+    dplyr::mutate(is_increasing_all = all >= zootech) %>%
+  dplyr::mutate(is_increasing_bucket = buckets >= zootech)%>%
+    tidyr::gather("pred", "value", 3:5)
+
+corr_spearman_rfi %>%
+  filter(pred != "all")%>%
+  ggplot(aes(x= pred, y=value))+
+  geom_boxplot()+
+  geom_point(aes(group=id),color = "black", size=1.5, alpha=0.30)+
+  geom_line(aes(group=id, color = if_else(is_increasing_bucket == F, "light blue", "light red")), show.legend = F)
+
+corr_spearman_rfi %>%
+  filter(pred != "buckets")%>%
+  ggplot(aes(x= pred, y=value))+
+  geom_boxplot()+
+  geom_point(aes(group=id),color = "black", size=1.5, alpha=0.30)+
+  geom_line(aes(group=id, color = if_else(is_increasing_all == F, "light blue", "light red")), show.legend = F)
+
+corr_spearman_rfi %>%
+  filter(pred == "all")%>%
+  group_by(is_increasing_all) %>%
+  count()%>%
+  mutate (pour = (n*100)/250)
+
+corr_spearman_rfi %>%
+  filter(pred == "buckets")%>%
+  group_by(is_increasing_bucket) %>%
+  count() %>%
+  mutate (pour = (n*100)/250)
+
+
+``` 
+
+***
+
+### IV. Prediction de la lignee {.tabset}
+```{r data lignee, message=FALSE, warning=FALSE}
+#Zootechnie
+loadings_lignee_zootech = read_tsv("for_cluster/output_V3/model250/lignee/loadings_lignee_zootech_SC_V3.tsv")
+metrics_lignee_zootech =read_tsv("for_cluster/output_V3/model250/lignee/metrics_lignee_zootech_SC_V3.tsv")
+  
+#Buckets
+loadings_lignee_buckets = read_tsv("for_cluster/output_V3/model250/lignee/loadings_lignee_buckets_SC_V3.tsv")
+metrics_lignee_buckets = read_tsv("for_cluster/output_V3/model250/lignee/metrics_lignee_buckets_SC_V3.tsv")
+
+#All
+loadings_lignee_all = read_tsv("for_cluster/output_V3/model250/lignee/loadings_lignee_all_SC_V3.tsv")
+metrics_lignee_all = read_tsv("for_cluster/output_V3/model250/lignee/metrics_lignee_all_SC_V3.tsv")
+```
+
+***
+
+#### 1. Zootechnie + Fixes
+
+##### a) metrics
+```{r metriques ZL, message=FALSE, warning=FALSE}
+metrics_lignee_zootech %>%
+  ggplot(aes(variable, value)) +
+  geom_jitter(color = "light grey", size=1.5, alpha=0.30) +
+  geom_boxplot(aes(color=variable))+
+  stat_summary(fun = mean, geom="point", shape=20, size=3, color="black", fill="black") +
+  labs(y= "Metriques", color = "Mesures" )+
+  ggtitle("Mesures pour spls lignee")+
+  facet_wrap(~variable, scale="free")
+
+metrics_lignee_zootech %>%
+  group_by(variable) %>%
+  summarise(min = min(value), mean = mean(value), max = max(value))
+```
+
+##### b) loadings
+
+```{r loadings ZL, message=FALSE, warning=FALSE}
+long_loadings = reshape2::melt(loadings_lignee_zootech,id.vars=c("rep", "comp"))
+
+long_loadings %>%
+  filter(comp == "comp1")%>%
+  ggplot(aes(variable, value)) +
+  geom_jitter(color = "light grey", size=1.5, alpha=0.30) +
+  geom_boxplot(aes(color=variable))+
+  labs(y= "Loadings", color = "Variables" )+
+  ggtitle("Loadings pour composante 1")
+
+long_loadings %>%
+  filter(comp == "comp2")%>%
+  ggplot(aes(variable, value)) +
+  geom_jitter(color = "light grey", size=1.5, alpha=0.30) +
+  geom_boxplot(aes(color=variable))+
+  labs(y= "Loadings", color = "Variables" )+
+  ggtitle("Loadings pour composante 2")
+
+long_loadings %>%
+  filter (comp == "comp1") %>%
+  group_by(comp, variable) %>%
+  summarise(mean = mean(value))%>%
+  filter(mean != 0) %>%
+  arrange(desc(mean))
+
+#mean loadings
+long_loadings %>%
+  filter (comp == "comp1") %>%
+  group_by(comp, variable) %>%
+  summarise(min= min(value), mean = mean(value), max = max(value), mean_abs = mean(abs(value)))%>%
+  filter(mean != 0) %>%
+  arrange(desc(mean_abs))
+
+#count loadings
+long_loadings %>%
+  filter (comp == "comp1" & value != 0) %>%
+  group_by(comp, variable) %>%
+  count() %>%
+  arrange(desc(n))
+```
+
+#### 2. Buckets
+
+
+##### a) metrics
+```{r metriques BL, message=FALSE, warning=FALSE}
+metrics_lignee_buckets %>%
+  ggplot(aes(variable, value)) +
+  geom_jitter(color = "light grey", size=1.5, alpha=0.30) +
+  geom_boxplot(aes(color=variable))+
+  stat_summary(fun = mean, geom="point", shape=20, size=3, color="black", fill="black") +
+  labs(y= "Metriques", color = "Mesures" )+
+  ggtitle("Mesures pour splsda lignee")+
+  facet_wrap(~variable, scale="free")
+
+metrics_lignee_buckets %>%
+  group_by(variable) %>%
+  summarise(min = min(value), mean = mean(value), max = max(value))
+```
+
+##### b) loadings
+
+```{r loadings BL, message=FALSE, warning=FALSE}
+long_loadings = reshape2::melt(loadings_lignee_buckets,id.vars=c("rep", "comp"))
+
+#mean loadings
+best_loadings = long_loadings %>%
+  filter (comp == "comp1") %>%
+  group_by(comp, variable) %>%
+  summarise(min= min(value), mean = mean(value), max = max(value), mean_abs = mean(abs(value)))%>%
+  filter(mean != 0) %>%
+  arrange(desc(mean_abs))
+best_loadings
+
+#count loadings
+long_loadings %>%
+  filter (comp == "comp1" & value != 0) %>%
+  group_by(comp, variable) %>%
+  count() %>%
+  arrange(desc(n))
+
+ggplotly(
+  best_loadings %>%
+  ggplot(aes(x=as.numeric(as.character(best_loadings$variable)), y=mean_abs))+
+  geom_col()+
+  annotate(geom = "point", x=metabolites$ppm, y=0, color = "blue", size = 0.5)+
+  annotate(geom="text", x=best_flo_pics, y=-0.005, color = "red", label=best_flo_names, size=2)+
+  annotate(geom = "point", x=best_flo_pics, y=0, color = "red", size = 0.6))
+```
+##### c) ncomp, nvar
+
+nombre composantes
+```{r}
+loadings_lignee_buckets %>%
+  group_by(rep) %>%
+  count()%>%
+  ungroup()%>%
+  summarise(mean = mean(n))
+
+loadings_lignee_buckets  %>%
+  group_by(rep) %>%
+  count()%>%
+  ggplot(aes(x=as_factor(n)))+
+  geom_bar()
+```
+
+nombre variables selectionnees : la grille ne fonctionne que pour la composante 1 !
+```{r}
+long_loadings %>%
+  filter(value != 0 & comp == "comp1") %>%
+  group_by(rep, comp) %>%
+  count()%>%
+  ggplot(aes(as_factor(n)))+
+  geom_bar()
+
+long_loadings %>%
+  filter(value != 0 & comp == "comp2") %>%
+  group_by(rep, comp) %>%
+  count()%>%
+  ggplot(aes(as_factor(n)))+
+  geom_bar()
+```
+
+##### c) Corresponding pics  [ERRORS]
+
+```{r eval=FALSE, include=FALSE}
+best_loadings %>%
+  filter(variable %>% metabolites$variable)
+
+metabolites %>%
+  filter(ppm >= 6.935 & ppm < 6.955)
+
+metabolites %>%
+  filter(metabolite == "B-HydroxyisovalericAcid")
+```
+
+
+#### 3. M+Z+F
+
+##### a) metrics
+```{r metriques AL, message=FALSE, warning=FALSE}
+metrics_lignee_all %>%
+  ggplot(aes(variable, value)) +
+  geom_jitter(color = "light grey", size=1.5, alpha=0.30) +
+  geom_boxplot(aes(color=variable))+
+  stat_summary(fun = mean, geom="point", shape=20, size=3, color="black", fill="black") +
+  labs(y= "Metriques", color = "Mesures" )+
+  ggtitle("Mesures pour spls lignee")+
+  facet_wrap(~variable, scale="free")
+
+metrics_lignee_all %>%
+  group_by(variable) %>%
+  summarise(min = min(value), mean = mean(value), max = max(value))
+```
+
+##### b) loadings
+
+```{r loadings AL, message=FALSE, warning=FALSE}
+long_loadings = reshape2::melt(loadings_lignee_all,id.vars=c("rep", "comp"))
+
+#mean loadings
+best_loadings = long_loadings %>%
+  filter (comp == "comp1") %>%
+  group_by(comp, variable) %>%
+  summarise(min= min(value), mean = mean(value), max = max(value), mean_abs = mean(abs(value)))%>%
+  filter(mean != 0) %>%
+  arrange(desc(mean_abs))
+best_loadings
+
+#count loadings
+long_loadings %>%
+  filter (comp == "comp1" & value != 0) %>%
+  group_by(comp, variable) %>%
+  count() %>%
+  arrange(desc(n))
+
+ggplotly(
+  best_loadings %>%
+  ggplot(aes(x=as.numeric(as.character(best_loadings$variable)), y=mean_abs))+
+  geom_col()+
+   annotate(geom = "point", x=metabolites$ppm, y=0, color = "blue", size = 0.5)+
+  annotate(geom="text", x=best_flo_pics, y=-0.005, color = "red", label=best_flo_names, size=2)+
+  annotate(geom = "point", x=best_flo_pics, y=0, color = "red", size = 0.6))
+```
+##### c) ncomp, nvar
+
+nombre composantes
+```{r}
+loadings_lignee_all %>%
+  group_by(rep) %>%
+  count()%>%
+  ungroup()%>%
+  summarise(mean = mean(n))
+
+loadings_lignee_all %>%
+  group_by(rep) %>%
+  count()%>%
+  ggplot(aes(x=as_factor(n)))+
+  geom_bar()
+```
+
+nombre variables selectionnees : la grille ne fonctionne que pour la composante 1 !
+```{r}
+long_loadings %>%
+  filter(value != 0 & comp == "comp1") %>%
+  group_by(rep, comp) %>%
+  count()%>%
+  ggplot(aes(as_factor(n)))+
+  geom_bar()
+
+long_loadings %>%
+  filter(value != 0 & comp == "comp2") %>%
+  group_by(rep, comp) %>%
+  count()%>%
+  ggplot(aes(as_factor(n)))+
+  geom_bar()
+```
+
+#### 4. Comparaison
+
+##### a) Comparaisons metrics
+
+```{r}
+cross.val.results = list(
+  accuracy = list(
+    Z = list(
+      BER = metrics_lignee_zootech %>%
+        filter(variable == "BER")%>%
+        select(value)%>%
+        as_vector()
+    ),
+    M =list(
+      BER = metrics_lignee_buckets %>%
+        filter(variable == "BER")%>%
+        select(value)%>%
+        as_vector()
+    ),
+    All =list(
+      BER = metrics_lignee_all %>%
+        filter(variable == "BER")%>%
+        select(value)%>%
+        as_vector()
+    )
+    
+  ),
+  n_training_instances = nech_sum[[1]],
+  n_testing_instances = nech_sum[[2]],
+  number.of.rep = 50,
+  number.of.folds = 5
+)
+```
+
+```{r}
+comp = algo.test(cross.val.results)
+```
+
+```{r}
+table = data.frame(diet_seq = rep("DAC",3),
+           outcome = rep("lignee",3), 
+           Predictors = comp$summary$algo[1:3],
+           BER = data.frame(BER = c(mean(cross.val.results$accuracy$Z$BER),mean(cross.val.results$accuracy$M$BER),mean(cross.val.results$accuracy$All$BER))),
+           sd = gsub('[()]', '',comp$summary$`(sd)`)[1:3],
+           letter = comp$summary$letter[1:3])
+
+table$letter = as_factor(table$letter)
+table$sd = as.numeric(table$sd)
+
+```
+
+```{r Plot comp lignee}
+p_lignee <-ggplot(table, aes(x=outcome, y=BER, fill=Predictors)) +
+  #barplot
+  geom_col(width = 0.5,#bar width
+           position = position_dodge(0.6),#space between bars on the same x
+           colour="black", size=0.2)+#colour and size of bar lines
+  scale_fill_manual(values=c("#9dc544", "#00a3a6","#423089"),#colors of bars
+                    name="Predictor set:")+#name for the legend
+  #error bars
+  geom_errorbar(aes(ymin=BER, ymax=BER+sign(BER)*sd),#length of error bars
+                 width=0.2,#width of error bars
+                 position=position_dodge(0.6),#space between bars on the same x
+                stat="identity")+
+  #letters to indicate significant differences or non significant
+  geom_text(aes(label = letter,#name of the variable used for labelling
+                y = BER + sign(BER)*sd +sign(BER)*0.05),#vertical position of the letter
+            position = position_dodge(0.6),#space between bars on the same x
+            family="Raleway", size=4.5)+#letter label style
+  #theme
+  theme_classic()+
+  #legend
+  theme(legend.position="top")+#legend position
+  theme(legend.title = element_text(colour="black", size=11, family="Raleway"))+#legend title style
+  theme(legend.text = element_text(colour="black", size=10, family="sans"))+#legend text style
+  #grid style
+  theme(panel.grid.major.y = element_line(color = "grey80", size = 0.5, linetype = 1))+#horizontal grid style
+  #x axis
+  xlab("Predicted outcome")+#x axis title
+  theme(axis.title.x = element_text(colour="black", size=10, family="Raleway SemiBold", vjust=-0.8))+# x axis title style
+  theme(axis.text.x = element_text(colour="grey30", size=10, family="sans"))+# x axis text style
+  #y axis
+  ylab("BER")+#y axis title
+  theme(axis.title.y = element_text(colour="black", size=10, family="Raleway SemiBold", vjust=+2))+# y axis title style
+  theme(axis.text.y = element_text(colour="grey30", size=10, family="sans"))
+
+p_lignee
+```
+
+##### b) Comparaisons boxplots 
+```{r}
+BER_lignee = metrics_lignee_zootech %>%
+  filter(variable == "BER") %>%
+  add_column("pred" = rep("zootech", 250)) %>%
+  rbind(
+metrics_lignee_buckets%>%
+  filter(variable == "BER") %>%
+  add_column("pred" = rep("buckets", 250))
+) %>%
+  rbind(
+metrics_lignee_all%>%
+  filter(variable == "BER") %>%
+  add_column("pred" = rep("all", 250))
+)
+```
+
+```{r}
+BER_lignee = BER_lignee %>%
+    tidyr::spread(pred, value) %>%
+    dplyr::mutate(is_decreasing_all = all <= zootech) %>%
+  dplyr::mutate(is_decreasing_bucket = buckets <= zootech)%>%
+    tidyr::gather("pred", "value", 3:5)
+
+BER_lignee %>%
+  filter(pred != "all")%>%
+  ggplot(aes(x= pred, y=value))+
+  geom_boxplot()+
+  geom_point(aes(group=id),color = "black", size=1.5, alpha=0.30)+
+  geom_line(aes(group=id, color = if_else(is_decreasing_bucket == F, "light blue", "light red")), show.legend = F)
+
+BER_lignee %>%
+  filter(pred != "buckets")%>%
+  ggplot(aes(x= pred, y=value))+
+  geom_boxplot()+
+  geom_point(aes(group=id),color = "black", size=1.5, alpha=0.30)+
+  geom_line(aes(group=id, color = if_else(is_decreasing_all == F, "light blue", "light red")), show.legend = F)
+
+BER_lignee %>%
+  filter(pred == "all")%>%
+  group_by(is_decreasing_all) %>%
+  count()%>%
+  mutate (pour = (n*100)/250)
+
+BER_lignee %>%
+  group_by(is_decreasing_bucket) %>%
+  count() %>%
+  mutate (pour = (n*100)/250)
+
+
+```
+
+***
+
+## Comparaisons {.tabset}
+
+
+### 1. R2
+```{r message=FALSE, warning=FALSE}
+library(cowplot)
+plot_grid(p_ingestion+
+            scale_y_continuous(
+              breaks = seq(0, 0.8,0.2), 
+              limits = c(0,1)),
+          p_fcr+
+            scale_y_continuous(
+              breaks = seq(0, 0.8,0.2), 
+              limits = c(0,1)),
+          p_rfi+
+            scale_y_continuous(
+              breaks = seq(0, 0.8,0.2), 
+              limits = c(0,1)), 
+          ncol = 3, nrow = 1)
+
+
+```
+
+### 2. corr_spearman
+
+```{r message=FALSE, warning=FALSE}
+plot_grid(p_ingestion_sp+
+            scale_y_continuous(
+              breaks = seq(-0.2, 0.8,0.2), 
+              limits = c(0,1)),
+          p_fcr_sp+
+            scale_y_continuous(
+              breaks = seq(-0.2, 0.8,0.2), 
+              limits = c(0,1)),
+          p_rfi_sp+
+            scale_y_continuous(
+              breaks = seq(-0.2, 0.8,0.2), 
+              limits = c(0,1)), 
+          ncol = 3, nrow = 1)
+
+
+```
+
+## Session Info
+```{r}
+sessionInfo()
+```

@@ -1,0 +1,425 @@
+---
+title: 'Prediction des quantifications de métabolites identifiés'
+author: "Anaïs Marquisseau"
+date: "17/06/2022"
+output: 
+  html_document :
+    df_print: paged
+    toc: true
+    toc_depth: 2
+    code_folding: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+## Librairies
+
+```{r librairies, message=FALSE, warning=FALSE}
+rm(list = ls(all.names = TRUE))
+gc()
+
+library(tidyverse)
+library(knitr)
+library(rsample)
+library(plotly)
+library(ggpubr)
+library(ASICS)
+library(readxl)
+
+theme_set(theme_minimal())
+```
+
+## Quantifications
+
+```{r}
+quantifs = read_excel("Data/quantifications/PlasmaDACv4.xlsx")
+
+metrics_quantifs = quantifs %>%
+  dplyr::select("Citrate", "L-Leucine", "beta-Hydroxyisovalerate")%>%
+  tidyr::gather()%>%
+  group_by(key)%>%
+  summarise(min=min(value), mean = mean(value), max = max(value), range = max(value)-min(value))
+
+metrics_quantifs
+range_cit = metrics_quantifs%>%filter(key=="Citrate")%>%dplyr::select(range)%>%as_vector()
+range_leu = metrics_quantifs%>%filter(key=="L-Leucine")%>%dplyr::select(range)%>%as_vector()
+range_bhy = metrics_quantifs%>%filter(key=="beta-Hydroxyisovalerate")%>%dplyr::select(range)%>%as_vector()
+```
+
+## Metabolites identifies 
+```{r pics florian, message=FALSE, warning=FALSE}
+metabolites = read_tsv("Data/Metabolites_pics_florian.tsv")
+
+metabolites %>%
+  filter(metabolite %in% c("Citrate", "L-Leucine", "B-HydroxyisovalericAcid"))
+
+#leucine
+leucine_id_name = c("L-Leu","L-Leu","L-Leu")
+leucine_id_pics = c(0.9660, 1.7200, 3.7400)
+
+#citrate
+citrate_id_name = c("Cit")
+citrate_id_pics = c(2.6000)
+
+#bhydroxy
+bhydroxy_id_name = c("B-Hyd","B-Hyd")
+bhydroxy_id_pics = c(1.2720, 2.3680)
+```
+
+## Predictions {.tabset}
+
+Prédictions sPLS :  
+  
+- Validations croisées nichées : 50 répétitions et 5 folds pour l'optimisation des hyperparamètres.   
+- 10 modèles finaux : Boucle extérieure avec 2 répétitions et 5 folds  
+  
+Approche "boîte noire" : Prédiction à partir de buckets métabolomiques sans identification.  
+  
+Retrouve-t-on les zones attribuées aux métabolites identifiés lorsqu'on prédit les quantifications de ces métabolites ?  
+  
+Sur le graphe des loadings, les points rouges correspondent aux pics identifiés pour le métabolite prédit.  
+  
+```{r}
+lib = pure_library
+
+#liste spectres purs
+#getSampleName(lib)
+```
+
+Les 3 métabolites à prédire : 
+
+```{r}
+plot(lib[c(49,56,126)], xlim = c(0.5, 10))
+```
+
+
+### 1. Prediction Citrate {.tabset}
+
+```{r data citrate}
+loadings_citrate_buckets = read_tsv("for_cluster/output_V3/model10/citrate/loadings_citrate_buckets_SC_V3.tsv")
+metrics_citrate_buckets = read_tsv("for_cluster/output_V3/model10/citrate/metrics_citrate_buckets_SC_V3.tsv")
+
+#spectre pur citrate 
+pure_cit = as_tibble(names(getSpectra(lib[56])[,1])) %>% add_column(valeur =getSpectra(lib[56])[,1]) %>% rename(ppm = value)
+```
+
+#### a) metrics
+```{r metriques BC, message=TRUE, warning=TRUE, paged.print=TRUE}
+metrics_citrate_buckets %>%
+  ggplot(aes(variable, value)) +
+  geom_jitter(color = "light grey", size=1.5, alpha=0.30) +
+  geom_boxplot(aes(color=variable))+
+  stat_summary(fun = mean, geom="point", shape=20, size=3, color="black", fill="black") +
+  labs(y= "Metriques", color = "Mesures" )+
+  ggtitle("Mesures pour spls citrate")+
+  facet_wrap(~variable, scale="free")
+
+metrics_citrate_buckets %>%
+  group_by(variable) %>%
+  summarise(min = min(value), mean = mean(value), max = max(value))
+```
+
+```{r}
+#MAE and range
+metrics_citrate_buckets %>%
+  filter(variable =="MAE") %>%
+  summarise(pourc_range = mean(value)*100/range_cit)
+```
+
+#### b) loadings
+
+```{r loadings BI, message=TRUE, warning=TRUE, paged.print=TRUE}
+long_loadings = reshape2::melt(loadings_citrate_buckets,id.vars=c("rep", "comp"))
+
+#mean loadings
+best_loadings = long_loadings %>%
+  filter (comp == "comp1") %>%
+  group_by(comp, variable) %>%
+  summarise(min= min(value), mean = mean(value), max = max(value), mean_abs = mean(abs(value)))%>%
+  filter(mean != 0) %>%
+  arrange(desc(mean_abs))
+best_loadings
+
+#count loadings
+long_loadings %>%
+  filter (comp == "comp1" & value != 0) %>%
+  group_by(comp, variable) %>%
+  count() %>%
+  arrange(desc(n))
+
+ggplotly(
+  best_loadings %>%
+  ggplot(aes(x=as.numeric(as.character(best_loadings$variable)), y=mean_abs))+
+  geom_col()+
+  annotate(geom = "point", x=metabolites$ppm, y=0, color = "blue", size = 0.5)+
+  annotate(geom = "point", x=citrate_id_pics, y=0, color = "red", size = 1))
+
+long_loadings %>%
+  filter(value != 0) %>%
+  group_by(rep, comp) %>%
+  summarise(n=n())%>%
+  filter(comp=="comp1")%>%
+  ungroup()%>%
+  ggplot(aes(as_factor(n)))+
+  geom_bar()
+  
+```
+
+#### c) Spectre pur
+
+```{r}
+ggplotly(
+pure_cit %>%
+  ggplot(aes(x=as.numeric(ppm), y=valeur))+
+  annotate(geom = "col", x=as.numeric(as.character(best_loadings$variable)), y=best_loadings$mean_abs*100, color = "black", size = 1)+
+  geom_line(aes(x=as.numeric(pure_cit$ppm), y=pure_cit$valeur), color = "green")
+)
+
+
+#spectre pur malate
+pure_mal = as_tibble(names(getSpectra(lib[137])[,1])) %>% add_column(valeur =getSpectra(lib[137])[,1]) %>% rename(ppm = value)
+
+ggplotly(
+pure_cit %>%
+  ggplot(aes(x=as.numeric(ppm), y=valeur))+
+  annotate(geom = "col", x=as.numeric(as.character(best_loadings$variable)), y=best_loadings$mean_abs*100, color = "black", size = 1)+
+  geom_line(aes(x=as.numeric(pure_mal$ppm), y=pure_mal$valeur), color = "orange")+
+  geom_line(aes(x=as.numeric(pure_cit$ppm), y=pure_cit$valeur), color = "green")
+)
+
+```
+
+***  
+  
+### 2. Prediction Leucine {.tabset}
+
+```{r data leucine}
+loadings_leucine_buckets = read_tsv("for_cluster/output_V3/model10/leucine/loadings_leucine_buckets_SC_V3.tsv")
+metrics_leucine_buckets = read_tsv("for_cluster/output_V3/model10/leucine/metrics_leucine_buckets_SC_V3.tsv")
+
+#spectre pur leucine
+pure_leu = as_tibble(names(getSpectra(lib[126])[,1])) %>% add_column(valeur =getSpectra(lib[126])[,1]) %>% rename(ppm = value)
+```
+
+#### a) metrics
+```{r metriques BL, message=TRUE, warning=TRUE, paged.print=TRUE}
+metrics_leucine_buckets %>%
+  ggplot(aes(variable, value)) +
+  geom_jitter(color = "light grey", size=1.5, alpha=0.30) +
+  geom_boxplot(aes(color=variable))+
+  stat_summary(fun = mean, geom="point", shape=20, size=3, color="black", fill="black") +
+  labs(y= "Metriques", color = "Mesures" )+
+  ggtitle("Mesures pour spls leucine")+
+  facet_wrap(~variable, scale="free")
+
+metrics_leucine_buckets %>%
+  group_by(variable) %>%
+  summarise(min = min(value), mean = mean(value), max = max(value))
+```
+
+```{r}
+metrics_leucine_buckets %>%
+  filter(variable =="MAE") %>%
+  summarise(pourc_range = mean(value)*100/range_leu)
+```
+
+
+#### b) loadings
+
+```{r loadings BL, message=TRUE, warning=TRUE, paged.print=TRUE}
+long_loadings = reshape2::melt(loadings_leucine_buckets,id.vars=c("rep", "comp"))
+
+#mean loadings
+best_loadings = long_loadings %>%
+  filter (comp == "comp1") %>%
+  group_by(comp, variable) %>%
+  summarise(min= min(value), mean = mean(value), max = max(value), mean_abs = mean(abs(value)))%>%
+  filter(mean != 0) %>%
+  arrange(desc(mean_abs))
+best_loadings
+
+#count loadings
+long_loadings %>%
+  filter (comp == "comp1" & value != 0) %>%
+  group_by(comp, variable) %>%
+  count() %>%
+  arrange(desc(n))
+
+ggplotly(
+  best_loadings %>%
+  ggplot(aes(x=as.numeric(as.character(best_loadings$variable)), y=mean_abs))+
+  geom_col()+
+  annotate(geom = "point", x=metabolites$ppm, y=0, color = "blue", size = 0.5)+
+  annotate(geom = "point", x=leucine_id_pics, y=0, color = "red", size = 1))
+
+long_loadings %>%
+  filter(value != 0) %>%
+  group_by(rep, comp) %>%
+  summarise(n=n())%>%
+  filter(comp=="comp1")%>%
+  ungroup()%>%
+  ggplot(aes(as_factor(n)))+
+  geom_bar()
+
+```
+
+#### c) Spectre pur
+
+```{r}
+ggplotly(
+pure_leu %>%
+  ggplot(aes(x=as.numeric(ppm), y=valeur))+
+  annotate(geom = "col", x=as.numeric(as.character(best_loadings$variable)), y=best_loadings$mean_abs*100, color = "black", size = 1)+
+  geom_line(aes(x=as.numeric(pure_leu$ppm), y=pure_leu$valeur), color = "blue")
+)
+
+
+#spectre pur isoleu
+pure_isoleu = as_tibble(names(getSpectra(lib[125])[,1])) %>% add_column(valeur =getSpectra(lib[125])[,1]) %>% rename(ppm = value)
+
+#spectre pur l phenyl
+pure_phe = as_tibble(names(getSpectra(lib[130])[,1])) %>% add_column(valeur =getSpectra(lib[130])[,1]) %>% rename(ppm = value)
+
+#spectre pur l valine
+pure_val = as_tibble(names(getSpectra(lib[136])[,1])) %>% add_column(valeur =getSpectra(lib[136])[,1]) %>% rename(ppm = value)
+
+
+ggplotly(
+pure_leu %>%
+  ggplot(aes(x=as.numeric(ppm), y=valeur))+
+  annotate(geom = "col", x=as.numeric(as.character(best_loadings$variable)), y=best_loadings$mean_abs*100, color = "black", size = 1)+
+  geom_line(aes(x=as.numeric(pure_isoleu$ppm), y=pure_isoleu$valeur), color = "orange")+
+  geom_line(aes(x=as.numeric(pure_phe$ppm), y=pure_phe$valeur), color = "green")+
+  geom_line(aes(x=as.numeric(pure_val$ppm), y=pure_val$valeur), color = "purple")+
+  geom_line(aes(x=as.numeric(pure_leu$ppm), y=pure_leu$valeur), color = "blue")
+)
+
+```
+
+Légende :  
+  
+  * Vert : L-Leucine  
+  * Orange : L-Isoleucine  
+  * Bleu : L-Phenylalanine  
+  * Violet : L-Valine   
+    
+***  
+  
+    
+### 3. Prediction B-hydroxyisovalerate {.tabset}
+
+
+```{r data bhydroxy}
+loadings_bhydroxy_buckets = read_tsv("for_cluster/output_V3/model10/bhydroxy/loadings_bhydroxy_buckets_SC_V3.tsv")
+metrics_bhydroxy_buckets = read_tsv("for_cluster/output_V3/model10/bhydroxy/metrics_bhydroxy_buckets_SC_V3.tsv")
+
+#spectre pur bhydro
+pure_bhy = as_tibble(names(getSpectra(lib[49])[,1])) %>% add_column(valeur =getSpectra(lib[49])[,1]) %>% rename(ppm = value)
+
+```
+
+#### a) metrics
+```{r metriques BH, message=TRUE, warning=TRUE, paged.print=TRUE}
+metrics_bhydroxy_buckets %>%
+  ggplot(aes(variable, value)) +
+  geom_jitter(color = "light grey", size=1.5, alpha=0.30) +
+  geom_boxplot(aes(color=variable))+
+  stat_summary(fun = mean, geom="point", shape=20, size=3, color="black", fill="black") +
+  labs(y= "Metriques", color = "Mesures" )+
+  ggtitle("Mesures pour spls bhydroxy")+
+  facet_wrap(~variable, scale="free")
+
+metrics_bhydroxy_buckets %>%
+  group_by(variable) %>%
+  summarise(min = min(value), mean = mean(value), max = max(value))
+```
+```{r}
+metrics_bhydroxy_buckets %>%
+  filter(variable =="MAE") %>%
+  summarise(pourc_range = mean(value)*100/range_bhy)
+```
+
+
+#### b) loadings
+
+```{r loadings BH, message=TRUE, warning=TRUE, paged.print=TRUE}
+long_loadings = reshape2::melt(loadings_bhydroxy_buckets,id.vars=c("rep", "comp"))
+
+#mean loadings
+best_loadings = long_loadings %>%
+  filter (comp == "comp1") %>%
+  group_by(comp, variable) %>%
+  summarise(min= min(value), mean = mean(value), max = max(value), mean_abs = mean(abs(value)))%>%
+  filter(mean != 0) %>%
+  arrange(desc(mean_abs))
+best_loadings
+
+#count loadings
+long_loadings %>%
+  filter (comp == "comp1" & value != 0) %>%
+  group_by(comp, variable) %>%
+  count() %>%
+  arrange(desc(n))
+
+ggplotly(
+  best_loadings %>%
+  ggplot(aes(x=as.numeric(as.character(best_loadings$variable)), y=mean_abs))+
+  geom_col()+
+  annotate(geom = "point", x=metabolites$ppm, y=0, color = "blue", size = 0.5)+
+  annotate(geom = "point", x=bhydroxy_id_pics, y=0, color = "red", size = 1))
+
+long_loadings %>%
+  filter(value != 0) %>%
+  group_by(rep, comp) %>%
+  summarise(n=n())%>%
+  filter(comp=="comp1")%>%
+  ungroup()%>%
+  ggplot(aes(as_factor(n)))+
+  geom_bar()
+
+```
+
+#### c) Spectre pur
+
+```{r}
+ggplotly(
+pure_bhy %>%
+  ggplot(aes(x=as.numeric(ppm), y=valeur))+
+  annotate(geom = "col", x=as.numeric(as.character(best_loadings$variable)), y=best_loadings$mean_abs*100, color = "black", size = 1)+
+  geom_line(aes(x=as.numeric(pure_bhy$ppm), y=pure_bhy$valeur), color = "red")
+)
+
+#spectre pur taurine
+pure_tau = as_tibble(names(getSpectra(lib[172])[,1])) %>% add_column(valeur =getSpectra(lib[172])[,1]) %>% rename(ppm = value)
+
+#spectre pur creatine
+pure_cre = as_tibble(names(getSpectra(lib[58])[,1])) %>% add_column(valeur =getSpectra(lib[58])[,1]) %>% rename(ppm = value)
+
+#spectre pur creatinine
+pure_cre2 = as_tibble(names(getSpectra(lib[59])[,1])) %>% add_column(valeur =getSpectra(lib[59])[,1]) %>% rename(ppm = value)
+
+
+ggplotly(
+pure_bhy %>%
+  ggplot(aes(x=as.numeric(ppm), y=valeur))+
+  annotate(geom = "col", x=as.numeric(as.character(best_loadings$variable)), y=best_loadings$mean_abs*100, color = "black", size = 1)+
+  geom_line(aes(x=as.numeric(pure_cre$ppm), y=pure_cre$valeur), color = "green")+
+  geom_line(aes(x=as.numeric(pure_cre2$ppm), y=pure_cre2$valeur), color = "purple")+
+  geom_line(aes(x=as.numeric(pure_tau$ppm), y=pure_tau$valeur), color = "orange")+
+  geom_line(aes(x=as.numeric(pure_bhy$ppm), y=pure_bhy$valeur), color = "red")
+)
+
+```
+  
+  
+
+***
+  
+## Session
+
+```{r}
+sessionInfo()
+```
+

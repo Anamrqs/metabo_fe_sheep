@@ -70,9 +70,6 @@ It contains 3 folders and 1 R script.
 
 ### Output
 
+Code outputs
 
 
-
-
-## License
-[MIT](https://choosealicense.com/licenses/mit/)
